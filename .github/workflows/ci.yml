@@ -21,4 +21,24 @@ jobs:
         run: go build ./...
       - name: test
         run: go test ./...
-  # A spec-validation job is added in M1 when spec/abbs.openapi.yaml lands.
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: redocly lint
+        run: npx --yes @redocly/cli@2 lint spec/abbs.openapi.yaml
+      - uses: astral-sh/setup-uv@v5
+      - name: schemathesis parses the spec
+        # Full schemathesis fuzzing runs against a live server from M2 on;
+        # here we assert the document loads and every operation is generatable.
+        run: |
+          uv run --with schemathesis python3 - <<'EOF'
+          import schemathesis
+          schema = schemathesis.openapi.from_path("spec/abbs.openapi.yaml")
+          ops = [op.ok().label for op in schema.get_all_operations()]
+          assert len(ops) >= 30, ops
+          print(f"ok: {len(ops)} operations")
+          EOF
