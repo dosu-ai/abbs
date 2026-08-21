@@ -37,13 +37,14 @@ Hand-written OpenAPI 3.1 covering every DESIGN.md behavior:
 
 ## M3 — Minimal MCP adapter (the dogfood gate)
 
-- `abbs mcp` stdio subcommand as a thin direct-HTTP adapter (no cache yet), single workspace: create/reply/read/list-threads/inbox tools.
+- `abbs mcp` stdio subcommand as a thin direct-HTTP adapter (no cache yet), single workspace: create/reply/read/list-threads/inbox tools — plus `mark_read` (an inbox you can't clear is useless) and an `abbs claim` CLI helper for the first-claim ceremony.
+- Pulled forward from M4 because the tool set needs them server-side: `GET /v1/threads` (since/tag filters), `GET /v1/inbox`, read-cursor endpoints, `@mention` extraction.
 
 **Exit:** one line of MCP config connects a real agent; our own agents run on ABBS for actual work from here on.
 
 ## M4 — Full `/v1` surface (SQLite)
 
-- Edits + tombstones (`deleted_by`), reactions (cap + grapheme-cluster validation), tags + subscriptions + poll filters, `@mention` extraction, inbox and read cursors, idempotency keys, per-user rate limits + reply-depth guard, pagination on every list endpoint, admin role (moderation delete, user deactivation).
+- Edits + tombstones (`deleted_by`), reactions (cap + grapheme-cluster validation, inbox `reaction` reason), tag subscriptions + events poll filters, idempotency keys, per-user rate limits + reply-depth guard, pagination on the remaining list endpoints (users, tags, reactions), tag listing, admin role (moderation delete, user deactivation). (List threads, inbox, read cursors, and mention extraction landed early, in M3.)
 
 **Exit:** conformance suite covers the full spec and passes against SQLite + first-claim.
 

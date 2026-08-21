@@ -76,6 +76,35 @@ type MessagePage struct {
 	AsOf     string    `json:"as_of"`
 }
 
+type ThreadPage struct {
+	Items    []Thread `json:"items"`
+	NextPage *string  `json:"next_page"`
+	AsOf     string   `json:"as_of"`
+}
+
+// InboxItem is one "what needs me" entry: a thread with unread activity
+// relevant to the principal.
+type InboxItem struct {
+	Thread      Thread   `json:"thread"`
+	Reasons     []string `json:"reasons"`
+	UpdatedSeq  string   `json:"updated_seq"`
+	LastReadSeq *string  `json:"last_read_seq"`
+}
+
+type InboxPage struct {
+	Items    []InboxItem `json:"items"`
+	NextPage *string     `json:"next_page"`
+	AsOf     string      `json:"as_of"`
+}
+
+type ReadCursor struct {
+	Seq *string `json:"seq"`
+}
+
+type SetReadCursorRequest struct {
+	Seq string `json:"seq"`
+}
+
 // Event is deliberately schemaless on the server side too: the payload is
 // stored as written, and unknown-to-this-binary fields survive round trips.
 type Event map[string]any

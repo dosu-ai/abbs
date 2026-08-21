@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/dosu-ai/abbs/internal/api"
 )
 
 func open(t *testing.T, path string) *Store {
@@ -174,6 +176,162 @@ func TestDurabilityAcrossReopen(t *testing.T) {
 	}
 	if len(msgs) != 2 {
 		t.Fatalf("messages after restart = %d, want 2 (nothing lost)", len(msgs))
+	}
+}
+
+func TestMentionsAndInbox(t *testing.T) {
+	s := open(t, filepath.Join(t.TempDir(), "abbs.db"))
+	defer s.Close()
+	claim(t, s, "alice")
+	claim(t, s, "bob")
+	claim(t, s, "carol")
+
+	// Mentions resolve only to existing users; trailing punctuation is
+	// handled; emails are not mentions.
+	thread, first, err := s.CreateThread("alice", "mentions", "ping @bob. also @ghost and mail@carol.example", nil, nil, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Mentions) != 1 || first.Mentions[0] != "bob" {
+		t.Fatalf("mentions = %v, want [bob]", first.Mentions)
+	}
+
+	// Bob is mentioned → inbox with reason mention; not a participant yet.
+	items, _, _, err := s.Inbox("bob", 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Thread.ID != thread.ID {
+		t.Fatalf("bob inbox = %+v, want the mention thread", items)
+	}
+	if len(items[0].Reasons) != 1 || items[0].Reasons[0] != "mention" {
+		t.Fatalf("bob reasons = %v, want [mention]", items[0].Reasons)
+	}
+	if items[0].LastReadSeq != nil {
+		t.Fatalf("bob has a read cursor he never set: %v", *items[0].LastReadSeq)
+	}
+
+	// Carol: not mentioned, not a participant → empty inbox.
+	if items, _, _, _ := s.Inbox("carol", 0, 50); len(items) != 0 {
+		t.Fatalf("carol inbox = %+v, want empty", items)
+	}
+
+	// Alice posted it herself → her own thread is read, inbox empty.
+	if items, _, _, _ := s.Inbox("alice", 0, 50); len(items) != 0 {
+		t.Fatalf("alice inbox = %+v, want empty (own post auto-reads)", items)
+	}
+
+	// Bob reads up to date → inbox clears.
+	last, _ := ParseSeq(thread.LastActivitySeq)
+	if err := s.SetReadCursor(thread.ID, "bob", last); err != nil {
+		t.Fatal(err)
+	}
+	if items, _, _, _ := s.Inbox("bob", 0, 50); len(items) != 0 {
+		t.Fatalf("bob inbox after mark-read = %+v, want empty", items)
+	}
+	got, err := s.GetReadCursor(thread.ID, "bob")
+	if err != nil || got == nil || *got != last {
+		t.Fatalf("read cursor = %v, %v; want %d", got, err, last)
+	}
+
+	// Bob replies → alice's inbox lights up with reason participant (she
+	// created it), and bob's own reply doesn't reappear in his inbox.
+	if _, err := s.PostMessage(thread.ID, "bob", "pong", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	items, _, _, err = s.Inbox("alice", 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Reasons[0] != "participant" {
+		t.Fatalf("alice inbox = %+v, want [participant]", items)
+	}
+	if items, _, _, _ := s.Inbox("bob", 0, 50); len(items) != 0 {
+		t.Fatalf("bob inbox after his own reply = %+v, want empty", items)
+	}
+
+	// DM inbox: reason dm for the non-poster; invisible to outsiders even
+	// when they are mentioned inside it.
+	dm, _, err := s.CreateThread("alice", "secret", "psst @bob, do not tell @carol", nil, []string{"alice", "bob"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, _, _, _ = s.Inbox("bob", 0, 50)
+	var dmItem *api.InboxItem
+	for i := range items {
+		if items[i].Thread.ID == dm.ID {
+			dmItem = &items[i]
+		}
+	}
+	if dmItem == nil {
+		t.Fatalf("bob inbox lacks the DM: %+v", items)
+	}
+	want := []string{"mention", "dm"}
+	if len(dmItem.Reasons) != 2 || dmItem.Reasons[0] != want[0] || dmItem.Reasons[1] != want[1] {
+		t.Fatalf("dm reasons = %v, want %v", dmItem.Reasons, want)
+	}
+	if items, _, _, _ := s.Inbox("carol", 0, 50); len(items) != 0 {
+		t.Fatalf("carol inbox leaks a DM she was mentioned in: %+v", items)
+	}
+}
+
+func TestListThreads(t *testing.T) {
+	s := open(t, filepath.Join(t.TempDir(), "abbs.db"))
+	defer s.Close()
+	claim(t, s, "alice")
+	claim(t, s, "bob")
+	claim(t, s, "carol")
+
+	a, _, err := s.CreateThread("alice", "go talk", "x", []string{"go", "dev"}, nil, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := s.CreateThread("alice", "cooking", "y", []string{"food"}, nil, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dm, _, err := s.CreateThread("alice", "private", "z", nil, []string{"alice", "bob"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Carol sees the two public threads, newest activity first, no DM.
+	items, _, _, err := s.ListThreads("carol", 0, 0, nil, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != b.ID || items[1].ID != a.ID {
+		t.Fatalf("carol threads = %+v", items)
+	}
+	// Bob sees the DM too, with participants populated.
+	items, _, _, _ = s.ListThreads("bob", 0, 0, nil, 50)
+	if len(items) != 3 || items[0].ID != dm.ID || len(items[0].Participants) != 2 {
+		t.Fatalf("bob threads = %+v", items)
+	}
+	// Tag filter is any-of.
+	items, _, _, _ = s.ListThreads("carol", 0, 0, []string{"go", "food"}, 50)
+	if len(items) != 2 {
+		t.Fatalf("tag any-of = %+v", items)
+	}
+	items, _, _, _ = s.ListThreads("carol", 0, 0, []string{"dev"}, 50)
+	if len(items) != 1 || items[0].ID != a.ID {
+		t.Fatalf("tag dev = %+v", items)
+	}
+	// since: only threads with activity after a's creation burst.
+	aSeq, _ := ParseSeq(a.LastActivitySeq)
+	items, _, _, _ = s.ListThreads("carol", aSeq, 0, nil, 50)
+	if len(items) != 1 || items[0].ID != b.ID {
+		t.Fatalf("since = %+v", items)
+	}
+	// Pagination walks without overlap.
+	page1, next, _, _ := s.ListThreads("bob", 0, 0, nil, 2)
+	if next == nil || len(page1) != 2 {
+		t.Fatalf("page1 = %+v next = %v", page1, next)
+	}
+	anchor, _ := ParseSeq(*next)
+	page2, next2, _, _ := s.ListThreads("bob", 0, anchor, nil, 2)
+	if next2 != nil || len(page2) != 1 || page2[0].ID == page1[0].ID || page2[0].ID == page1[1].ID {
+		t.Fatalf("page2 = %+v next = %v", page2, next2)
 	}
 }
 

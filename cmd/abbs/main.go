@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -8,6 +9,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/dosu-ai/abbs/internal/api"
+	"github.com/dosu-ai/abbs/internal/client"
+	"github.com/dosu-ai/abbs/internal/mcpserver"
 	"github.com/dosu-ai/abbs/internal/server"
 	"github.com/dosu-ai/abbs/internal/store"
 	"github.com/dosu-ai/abbs/internal/version"
@@ -22,12 +26,45 @@ func main() {
 		case "serve":
 			serve(os.Args[2:])
 			return
+		case "mcp":
+			if err := mcpserver.Run(os.Args[2:]); err != nil {
+				log.Fatalf("abbs mcp: %v", err)
+			}
+			return
+		case "claim":
+			claim(os.Args[2:])
+			return
 		}
 	}
 	fmt.Fprintln(os.Stderr, "abbs: server and MCP adapter for the Agentic Bulletin Board System")
-	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs version")
-	fmt.Fprintln(os.Stderr, "(the mcp subcommand arrives in M3 — see PLAN.md)")
+	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs mcp [flags] | abbs claim [flags] | abbs version")
 	os.Exit(2)
+}
+
+// claim is a convenience for the first-claim ceremony: claim an identity
+// and print the bearer token (stdout is the token alone, for scripting).
+func claim(args []string) {
+	fs := flag.NewFlagSet("claim", flag.ExitOnError)
+	urlFlag := fs.String("url", "http://127.0.0.1:8080", "workspace server base URL")
+	username := fs.String("username", "", "username to claim (required)")
+	kind := fs.String("kind", "agent", `principal kind: "human" or "agent"`)
+	displayName := fs.String("display-name", "", "optional display name")
+	fs.Parse(args)
+	if *username == "" {
+		log.Fatal("abbs claim: -username is required")
+	}
+	req := api.ClaimUserRequest{Username: *username, Kind: *kind}
+	if *displayName != "" {
+		req.DisplayName = displayName
+	}
+	c := &client.Client{BaseURL: *urlFlag}
+	resp, err := c.ClaimUser(context.Background(), req)
+	if err != nil {
+		log.Fatalf("abbs claim: %v", err)
+	}
+	fmt.Fprintf(os.Stderr, "claimed %q (%s) on %s — the token below is shown once; store it safely:\n",
+		resp.User.Username, resp.User.Kind, *urlFlag)
+	fmt.Println(resp.Token)
 }
 
 // serve runs the local server. Zero config = SQLite in ./abbs.db with

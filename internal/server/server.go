@@ -48,9 +48,13 @@ func New(st *store.Store, workspaceName, workspaceDescription string) http.Handl
 	mux.HandleFunc("GET /v1/server", s.handleGetServer)
 	mux.HandleFunc("POST /v1/users", s.handleClaimUser)
 	mux.HandleFunc("POST /v1/threads", s.handleCreateThread)
+	mux.HandleFunc("GET /v1/threads", s.handleListThreads)
 	mux.HandleFunc("GET /v1/threads/{thread_id}", s.handleGetThread)
 	mux.HandleFunc("GET /v1/threads/{thread_id}/messages", s.handleListMessages)
 	mux.HandleFunc("POST /v1/threads/{thread_id}/messages", s.handlePostMessage)
+	mux.HandleFunc("GET /v1/threads/{thread_id}/read-cursor", s.handleGetReadCursor)
+	mux.HandleFunc("PUT /v1/threads/{thread_id}/read-cursor", s.handleSetReadCursor)
+	mux.HandleFunc("GET /v1/inbox", s.handleInbox)
 	mux.HandleFunc("GET /v1/events", s.handleEvents)
 
 	// Unmatched routes get a problem+json 404, not the mux's plain text.
@@ -291,14 +295,9 @@ func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	after := int64(0)
-	if p := r.URL.Query().Get("page"); p != "" {
-		n, err := store.ParseSeq(p)
-		if err != nil {
-			writeProblem(w, http.StatusBadRequest, "validation", "invalid page token")
-			return
-		}
-		after = n
+	after, ok := parsePageAnchor(w, r)
+	if !ok {
+		return
 	}
 	limit, ok := s.parseLimit(w, r, 50)
 	if !ok {
@@ -327,6 +326,121 @@ func (s *Server) parseLimit(w http.ResponseWriter, r *http.Request, def int) (in
 		return 0, false
 	}
 	return n, true
+}
+
+// parsePageAnchor turns an optional page token into a seq anchor (0 = none).
+func parsePageAnchor(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	p := r.URL.Query().Get("page")
+	if p == "" {
+		return 0, true
+	}
+	n, err := store.ParseSeq(p)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "validation", "invalid page token")
+		return 0, false
+	}
+	return n, true
+}
+
+func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.authenticate(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	since := int64(0)
+	if v := q.Get("since"); v != "" {
+		n, err := store.ParseSeq(v)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "validation", "invalid since cursor")
+			return
+		}
+		since = n
+	}
+	before, ok := parsePageAnchor(w, r)
+	if !ok {
+		return
+	}
+	limit, ok := s.parseLimit(w, r, 50)
+	if !ok {
+		return
+	}
+	tags := normalizeTags(q["tag"])
+	items, nextPage, asOf, err := s.store.ListThreads(user.Username, since, before, tags, limit)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.ThreadPage{Items: items, NextPage: nextPage, AsOf: asOf})
+}
+
+func (s *Server) handleInbox(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.authenticate(w, r)
+	if !ok {
+		return
+	}
+	before, ok := parsePageAnchor(w, r)
+	if !ok {
+		return
+	}
+	limit, ok := s.parseLimit(w, r, 50)
+	if !ok {
+		return
+	}
+	items, nextPage, asOf, err := s.store.Inbox(user.Username, before, limit)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.InboxPage{Items: items, NextPage: nextPage, AsOf: asOf})
+}
+
+func (s *Server) handleGetReadCursor(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.authenticate(w, r)
+	if !ok {
+		return
+	}
+	seq, err := s.store.GetReadCursor(r.PathValue("thread_id"), user.Username)
+	if errors.Is(err, store.ErrNotFound) {
+		writeProblem(w, http.StatusNotFound, "not-found", "no such thread")
+		return
+	}
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	var rc api.ReadCursor
+	if seq != nil {
+		tok := strconv.FormatInt(*seq, 10)
+		rc.Seq = &tok
+	}
+	writeJSON(w, http.StatusOK, rc)
+}
+
+func (s *Server) handleSetReadCursor(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.authenticate(w, r)
+	if !ok {
+		return
+	}
+	var req api.SetReadCursorRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	seq, err := store.ParseSeq(req.Seq)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "validation", "invalid seq")
+		return
+	}
+	err = s.store.SetReadCursor(r.PathValue("thread_id"), user.Username, seq)
+	if errors.Is(err, store.ErrNotFound) {
+		writeProblem(w, http.StatusNotFound, "not-found", "no such thread")
+		return
+	}
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleEvents is the catch-up read and the long-poll — the same query,

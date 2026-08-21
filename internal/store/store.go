@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,7 +83,33 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages (thread_id, created_seq);
 CREATE INDEX IF NOT EXISTS idx_threads_activity ON threads (last_activity_seq);
+CREATE TABLE IF NOT EXISTS thread_tags (
+	thread_id TEXT NOT NULL,
+	tag       TEXT NOT NULL,
+	PRIMARY KEY (thread_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_thread_tags_tag ON thread_tags (tag);
+CREATE TABLE IF NOT EXISTS mentions (
+	message_id TEXT NOT NULL,
+	thread_id  TEXT NOT NULL,
+	username   TEXT NOT NULL,
+	seq        INTEGER NOT NULL,
+	PRIMARY KEY (message_id, username)
+);
+CREATE INDEX IF NOT EXISTS idx_mentions_user ON mentions (username, seq);
+CREATE TABLE IF NOT EXISTS read_cursors (
+	username  TEXT NOT NULL,
+	thread_id TEXT NOT NULL,
+	seq       INTEGER NOT NULL,
+	PRIMARY KEY (username, thread_id)
+);
 `
+
+// migrations are idempotent column additions the base schema (CREATE TABLE
+// IF NOT EXISTS) cannot express; "duplicate column" errors are expected.
+var migrations = []string{
+	`ALTER TABLE messages ADD COLUMN mentions TEXT`,
+}
 
 type Store struct {
 	db *sql.DB
@@ -104,6 +131,12 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	for _, m := range migrations {
+		if _, err := db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			db.Close()
+			return nil, fmt.Errorf("apply migration %q: %w", m, err)
+		}
 	}
 	return &Store{db: db, wakeup: newBroadcast()}, nil
 }
@@ -223,6 +256,58 @@ func scanUser(row rowScanner) (api.User, error) {
 	return u, nil
 }
 
+// mentionRE finds @username candidates: an @ not embedded in a word (so
+// emails don't match), followed by a well-formed username.
+var mentionRE = regexp.MustCompile(`(?:^|[^a-zA-Z0-9._@-])@([a-z0-9][a-z0-9._-]{0,31})`)
+
+// extractMentions resolves @mention candidates in markdown against the
+// users table; only existing usernames survive. A candidate that fails to
+// resolve is retried with trailing punctuation-ish characters trimmed, so
+// "ask @bob." mentions bob.
+func extractMentions(tx *sql.Tx, content string) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range mentionRE.FindAllStringSubmatch(content, -1) {
+		for _, cand := range []string{m[1], strings.TrimRight(m[1], "._-")} {
+			if cand == "" || seen[cand] {
+				break
+			}
+			var one int
+			err := tx.QueryRow(`SELECT 1 FROM users WHERE username = ?`, cand).Scan(&one)
+			if err == nil {
+				seen[cand] = true
+				out = append(out, cand)
+				break
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
+}
+
+func insertMentions(tx *sql.Tx, messageID, threadID string, usernames []string, seq int64) error {
+	for _, u := range usernames {
+		if _, err := tx.Exec(`INSERT INTO mentions (message_id, thread_id, username, seq) VALUES (?, ?, ?, ?)`,
+			messageID, threadID, u, seq); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// advanceReadCursor moves a user's read cursor forward (never backward) —
+// used so one's own posts don't land in one's own inbox. The manual PUT
+// (SetReadCursor) is absolute instead and may move backward.
+func advanceReadCursor(tx *sql.Tx, username, threadID string, seq int64) error {
+	_, err := tx.Exec(
+		`INSERT INTO read_cursors (username, thread_id, seq) VALUES (?, ?, ?)
+		 ON CONFLICT (username, thread_id) DO UPDATE SET seq = excluded.seq WHERE excluded.seq > read_cursors.seq`,
+		username, threadID, seq)
+	return err
+}
+
 // CreateThread creates a thread and its first message in one transaction.
 // A non-nil participants set makes it a DM whose membership (participants ∪
 // creator) is permanently fixed. Tags must already be normalized.
@@ -279,11 +364,16 @@ func (s *Store) CreateThread(creator, title, content string, tags, participants 
 		CreatedSeq:      seqToken(threadSeq),
 		LastActivitySeq: seqToken(messageSeq),
 	}
+	mentioned, err := extractMentions(tx, content)
+	if err != nil {
+		return api.Thread{}, api.Message{}, err
+	}
 	msg := api.Message{
 		ID:        messageID,
 		ThreadID:  threadID,
 		Author:    creator,
 		Content:   content,
+		Mentions:  mentioned,
 		CreatedAt: ts,
 		Seq:       seqToken(messageSeq),
 		Reactions: []api.ReactionTally{},
@@ -310,10 +400,25 @@ func (s *Store) CreateThread(creator, title, content string, tags, participants 
 			return api.Thread{}, api.Message{}, err
 		}
 	}
+	for _, tag := range tags {
+		if _, err := tx.Exec(`INSERT INTO thread_tags (thread_id, tag) VALUES (?, ?)`, threadID, tag); err != nil {
+			return api.Thread{}, api.Message{}, err
+		}
+	}
+	mentionsJSON, err := json.Marshal(mentioned)
+	if err != nil {
+		return api.Thread{}, api.Message{}, err
+	}
 	if _, err := tx.Exec(
-		`INSERT INTO messages (id, thread_id, author, content, created_at, created_seq, seq) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		messageID, threadID, creator, content, ts, messageSeq, messageSeq,
+		`INSERT INTO messages (id, thread_id, author, content, mentions, created_at, created_seq, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		messageID, threadID, creator, content, string(mentionsJSON), ts, messageSeq, messageSeq,
 	); err != nil {
+		return api.Thread{}, api.Message{}, err
+	}
+	if err := insertMentions(tx, messageID, threadID, mentioned, messageSeq); err != nil {
+		return api.Thread{}, api.Message{}, err
+	}
+	if err := advanceReadCursor(tx, creator, threadID, messageSeq); err != nil {
 		return api.Thread{}, api.Message{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -335,13 +440,14 @@ type querier interface {
 	Query(query string, args ...any) (*sql.Rows, error)
 }
 
-func getThread(q querier, id, viewer string) (api.Thread, error) {
+// scanThread scans the canonical thread column list:
+// id, kind, title, tags, creator, created_at, created_seq, last_activity_seq.
+// Participants are loaded separately.
+func scanThread(row rowScanner) (api.Thread, error) {
 	var t api.Thread
 	var tagsJSON string
 	var createdSeq, lastActivitySeq int64
-	err := q.QueryRow(
-		`SELECT id, kind, title, tags, creator, created_at, created_seq, last_activity_seq FROM threads WHERE id = ?`, id,
-	).Scan(&t.ID, &t.Kind, &t.Title, &tagsJSON, &t.Creator, &t.CreatedAt, &createdSeq, &lastActivitySeq)
+	err := row.Scan(&t.ID, &t.Kind, &t.Title, &tagsJSON, &t.Creator, &t.CreatedAt, &createdSeq, &lastActivitySeq)
 	if errors.Is(err, sql.ErrNoRows) {
 		return api.Thread{}, ErrNotFound
 	}
@@ -353,23 +459,39 @@ func getThread(q querier, id, viewer string) (api.Thread, error) {
 	}
 	t.CreatedSeq = seqToken(createdSeq)
 	t.LastActivitySeq = seqToken(lastActivitySeq)
+	return t, nil
+}
+
+func loadParticipants(q querier, threadID string) ([]string, error) {
+	rows, err := q.Query(`SELECT username FROM thread_participants WHERE thread_id = ? ORDER BY username`, threadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func getThread(q querier, id, viewer string) (api.Thread, error) {
+	t, err := scanThread(q.QueryRow(
+		`SELECT id, kind, title, tags, creator, created_at, created_seq, last_activity_seq FROM threads WHERE id = ?`, id))
+	if err != nil {
+		return api.Thread{}, err
+	}
 	if t.Kind == "dm" {
-		rows, err := q.Query(`SELECT username FROM thread_participants WHERE thread_id = ? ORDER BY username`, id)
-		if err != nil {
+		if t.Participants, err = loadParticipants(q, id); err != nil {
 			return api.Thread{}, err
 		}
-		defer rows.Close()
 		member := false
-		for rows.Next() {
-			var p string
-			if err := rows.Scan(&p); err != nil {
-				return api.Thread{}, err
-			}
-			t.Participants = append(t.Participants, p)
+		for _, p := range t.Participants {
 			member = member || p == viewer
-		}
-		if err := rows.Err(); err != nil {
-			return api.Thread{}, err
 		}
 		if !member {
 			return api.Thread{}, ErrNotFound
@@ -398,11 +520,16 @@ func (s *Store) PostMessage(threadID, author, content string, at time.Time) (api
 	if err != nil {
 		return api.Message{}, err
 	}
+	mentioned, err := extractMentions(tx, content)
+	if err != nil {
+		return api.Message{}, err
+	}
 	msg := api.Message{
 		ID:        newID(),
 		ThreadID:  threadID,
 		Author:    author,
 		Content:   content,
+		Mentions:  mentioned,
 		CreatedAt: ts,
 		Seq:       seqToken(seq),
 		Reactions: []api.ReactionTally{},
@@ -410,13 +537,23 @@ func (s *Store) PostMessage(threadID, author, content string, at time.Time) (api
 	if err := updateEventPayload(tx, seq, map[string]any{"message": msg}); err != nil {
 		return api.Message{}, err
 	}
+	mentionsJSON, err := json.Marshal(mentioned)
+	if err != nil {
+		return api.Message{}, err
+	}
 	if _, err := tx.Exec(
-		`INSERT INTO messages (id, thread_id, author, content, created_at, created_seq, seq) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		msg.ID, threadID, author, content, ts, seq, seq,
+		`INSERT INTO messages (id, thread_id, author, content, mentions, created_at, created_seq, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, threadID, author, content, string(mentionsJSON), ts, seq, seq,
 	); err != nil {
 		return api.Message{}, err
 	}
+	if err := insertMentions(tx, msg.ID, threadID, mentioned, seq); err != nil {
+		return api.Message{}, err
+	}
 	if _, err := tx.Exec(`UPDATE threads SET last_activity_seq = ? WHERE id = ?`, seq, threadID); err != nil {
+		return api.Message{}, err
+	}
+	if err := advanceReadCursor(tx, author, threadID, seq); err != nil {
 		return api.Message{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -440,7 +577,7 @@ func (s *Store) ListMessages(threadID, viewer string, after int64, limit int) (i
 	asOf = seqToken(cur)
 
 	rows, err := s.db.Query(
-		`SELECT id, thread_id, author, content, deleted, created_at, edited_at, deleted_at, deleted_by, created_seq, seq
+		`SELECT id, thread_id, author, content, mentions, deleted, created_at, edited_at, deleted_at, deleted_by, created_seq, seq
 		 FROM messages WHERE thread_id = ? AND created_seq > ? ORDER BY created_seq LIMIT ?`,
 		threadID, after, limit+1)
 	if err != nil {
@@ -452,15 +589,20 @@ func (s *Store) ListMessages(threadID, viewer string, after int64, limit int) (i
 	createdSeqs := []int64{}
 	for rows.Next() {
 		var m api.Message
-		var content, editedAt, deletedAt, deletedBy sql.NullString
+		var content, mentions, editedAt, deletedAt, deletedBy sql.NullString
 		var deleted int
 		var createdSeq, seq int64
-		if err := rows.Scan(&m.ID, &m.ThreadID, &m.Author, &content, &deleted, &m.CreatedAt, &editedAt, &deletedAt, &deletedBy, &createdSeq, &seq); err != nil {
+		if err := rows.Scan(&m.ID, &m.ThreadID, &m.Author, &content, &mentions, &deleted, &m.CreatedAt, &editedAt, &deletedAt, &deletedBy, &createdSeq, &seq); err != nil {
 			return nil, nil, "", err
 		}
 		m.Deleted = deleted != 0
 		if !m.Deleted {
 			m.Content = content.String
+			if mentions.Valid && mentions.String != "" {
+				if err := json.Unmarshal([]byte(mentions.String), &m.Mentions); err != nil {
+					return nil, nil, "", err
+				}
+			}
 		}
 		if editedAt.Valid {
 			m.EditedAt = &editedAt.String
@@ -483,6 +625,193 @@ func (s *Store) ListMessages(threadID, viewer string, after int64, limit int) (i
 		nextPage = &tok
 	}
 	return items, nextPage, asOf, nil
+}
+
+// ListThreads pages through the viewer's visible threads, most recent
+// activity first. since=0 means no lower bound; before=0 (the page anchor)
+// means start from the top; tags narrows to threads carrying any of them.
+func (s *Store) ListThreads(viewer string, since, before int64, tags []string, limit int) (items []api.Thread, nextPage *string, asOf string, err error) {
+	cur, err := s.CurrentSeq()
+	if err != nil {
+		return nil, nil, "", err
+	}
+	asOf = seqToken(cur)
+
+	query := `SELECT id, kind, title, tags, creator, created_at, created_seq, last_activity_seq FROM threads t
+		 WHERE (t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))`
+	args := []any{viewer}
+	if since > 0 {
+		query += ` AND t.last_activity_seq > ?`
+		args = append(args, since)
+	}
+	if before > 0 {
+		query += ` AND t.last_activity_seq < ?`
+		args = append(args, before)
+	}
+	if len(tags) > 0 {
+		query += ` AND EXISTS (SELECT 1 FROM thread_tags tt WHERE tt.thread_id = t.id AND tt.tag IN (?` + strings.Repeat(", ?", len(tags)-1) + `))`
+		for _, tag := range tags {
+			args = append(args, tag)
+		}
+	}
+	query += ` ORDER BY t.last_activity_seq DESC LIMIT ?`
+	args = append(args, limit+1)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer rows.Close()
+
+	items = []api.Thread{}
+	for rows.Next() {
+		t, err := scanThread(rows)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		items = append(items, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, "", err
+	}
+	if len(items) > limit {
+		items = items[:limit]
+		tok := items[limit-1].LastActivitySeq
+		nextPage = &tok
+	}
+	for i := range items {
+		if items[i].Kind == "dm" {
+			if items[i].Participants, err = loadParticipants(s.db, items[i].ID); err != nil {
+				return nil, nil, "", err
+			}
+		}
+	}
+	return items, nextPage, asOf, nil
+}
+
+// Inbox pages through "what needs me": visible threads with activity past
+// the viewer's read cursor, where the viewer is a DM participant, a public-
+// thread participant (creator or has posted), or has an unread mention.
+// Ordered by most recent activity first; before is the page anchor.
+func (s *Store) Inbox(viewer string, before int64, limit int) (items []api.InboxItem, nextPage *string, asOf string, err error) {
+	cur, err := s.CurrentSeq()
+	if err != nil {
+		return nil, nil, "", err
+	}
+	asOf = seqToken(cur)
+
+	query := `SELECT t.id, t.kind, t.title, t.tags, t.creator, t.created_at, t.created_seq, t.last_activity_seq,
+			rc.seq,
+			EXISTS (SELECT 1 FROM mentions mn WHERE mn.thread_id = t.id AND mn.username = ? AND mn.seq > COALESCE(rc.seq, 0)) AS has_mention,
+			(t.creator = ? OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.author = ?)) AS is_participant
+		 FROM threads t
+		 LEFT JOIN read_cursors rc ON rc.thread_id = t.id AND rc.username = ?
+		 WHERE t.last_activity_seq > COALESCE(rc.seq, 0)
+		   AND (t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))
+		   AND (t.kind = 'dm'
+		        OR t.creator = ?
+		        OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.author = ?)
+		        OR EXISTS (SELECT 1 FROM mentions mn WHERE mn.thread_id = t.id AND mn.username = ? AND mn.seq > COALESCE(rc.seq, 0)))`
+	args := []any{viewer, viewer, viewer, viewer, viewer, viewer, viewer, viewer}
+	if before > 0 {
+		query += ` AND t.last_activity_seq < ?`
+		args = append(args, before)
+	}
+	query += ` ORDER BY t.last_activity_seq DESC LIMIT ?`
+	args = append(args, limit+1)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer rows.Close()
+
+	items = []api.InboxItem{}
+	for rows.Next() {
+		var it api.InboxItem
+		var tagsJSON string
+		var createdSeq, lastActivitySeq int64
+		var readSeq sql.NullInt64
+		var hasMention, isParticipant int
+		if err := rows.Scan(&it.Thread.ID, &it.Thread.Kind, &it.Thread.Title, &tagsJSON, &it.Thread.Creator,
+			&it.Thread.CreatedAt, &createdSeq, &lastActivitySeq, &readSeq, &hasMention, &isParticipant); err != nil {
+			return nil, nil, "", err
+		}
+		if err := json.Unmarshal([]byte(tagsJSON), &it.Thread.Tags); err != nil {
+			return nil, nil, "", err
+		}
+		it.Thread.CreatedSeq = seqToken(createdSeq)
+		it.Thread.LastActivitySeq = seqToken(lastActivitySeq)
+		it.UpdatedSeq = it.Thread.LastActivitySeq
+		if readSeq.Valid {
+			tok := seqToken(readSeq.Int64)
+			it.LastReadSeq = &tok
+		}
+		if hasMention != 0 {
+			it.Reasons = append(it.Reasons, "mention")
+		}
+		if it.Thread.Kind == "dm" {
+			it.Reasons = append(it.Reasons, "dm")
+		} else if isParticipant != 0 {
+			it.Reasons = append(it.Reasons, "participant")
+		}
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, "", err
+	}
+	if len(items) > limit {
+		items = items[:limit]
+		tok := items[limit-1].Thread.LastActivitySeq
+		nextPage = &tok
+	}
+	for i := range items {
+		if items[i].Thread.Kind == "dm" {
+			if items[i].Thread.Participants, err = loadParticipants(s.db, items[i].Thread.ID); err != nil {
+				return nil, nil, "", err
+			}
+		}
+	}
+	return items, nextPage, asOf, nil
+}
+
+// GetReadCursor returns the viewer's read cursor for a visible thread, nil
+// when never set.
+func (s *Store) GetReadCursor(threadID, viewer string) (*int64, error) {
+	if _, err := s.GetThread(threadID, viewer); err != nil {
+		return nil, err
+	}
+	var seq int64
+	err := s.db.QueryRow(`SELECT seq FROM read_cursors WHERE username = ? AND thread_id = ?`, viewer, threadID).Scan(&seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &seq, nil
+}
+
+// SetReadCursor sets the viewer's read cursor for a visible thread to an
+// absolute position — moving backward is allowed (marks things unread).
+func (s *Store) SetReadCursor(threadID, viewer string, seq int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := getThread(tx, threadID, viewer); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO read_cursors (username, thread_id, seq) VALUES (?, ?, ?)
+		 ON CONFLICT (username, thread_id) DO UPDATE SET seq = excluded.seq`,
+		viewer, threadID, seq); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // CurrentSeq is the newest sequence in the log (0 when empty).
