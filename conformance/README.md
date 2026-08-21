@@ -24,7 +24,7 @@ ABBS_BASE_URL=https://your-server.example go test ./...
   auth mode (`GET /v1/server` → `auth_modes`): it provisions its own
   throwaway identities with randomized usernames, so a target server may be
   reused across runs. Credential injection for `api-key`/`oidc` modes
-  arrives with those modes (M6/M7).
+  arrives with those modes (M6/M10).
 - Default rate limits are assumed generous enough for the suite's pace
   (≤20 rapid writes per principal); the reply-loop guard is respected by
   design (no test posts ≥10 rapid messages by ≤2 authors in one thread).
@@ -50,7 +50,7 @@ and a pre-kill cursor must resume cleanly after restart.
 - **Cursor semantics**: batch cursor equals the last event's seq; empty
   batches echo the request cursor; paging never duplicates or skips —
   verified under concurrent writers (the sequence-gap property that gets a
-  dedicated Postgres job in M6).
+  dedicated Postgres job in M9).
 - **Long-poll timing**: pending events return immediately; empty polls hold
   for the timeout and echo; parked polls wake promptly on new events.
 - **Idempotency**: byte-identical replay, body-mismatch conflict, and a
@@ -64,5 +64,5 @@ and a pre-kill cursor must resume cleanly after restart.
 
 Schema fuzzing is layered on in CI with schemathesis against a live server
 (see `.github/workflows/ci.yml`); client-cache evolution-rule fuzzing
-(unknown event types must not crash or stall SDK cursors) lands with the
-SDK cache in M8.
+(unknown event types must not crash or stall client cursors) lands with the
+client cache in M7.

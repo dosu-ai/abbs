@@ -3,7 +3,7 @@
 // tombstones), reactions, tags and subscriptions, inbox and read cursors,
 // filtered events long-poll, idempotency keys, per-user rate limits, the
 // reply-loop guard, and the admin role. OAuth-mode agents endpoints arrive
-// in M7.
+// in M10.
 package server
 
 import (

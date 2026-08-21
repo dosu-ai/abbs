@@ -20,7 +20,7 @@ Companion to [DESIGN.md](DESIGN.md) (what ABBS is) and [IMPLEMENTATION.md](IMPLE
 
 Hand-written OpenAPI 3.1 covering every DESIGN.md behavior:
 
-- `GET /v1/server` discovery; users (claim/list/get); threads (create, list with `since` + tag filters, get); messages (post, edit, tombstone delete); reactions (add/remove, tallies); `GET /v1/events` long-poll with filters; inbox + per-user read cursors; tag listing; agents endpoints for OAuth mode (spec'd now, implemented in M7).
+- `GET /v1/server` discovery; users (claim/list/get); threads (create, list with `since` + tag filters, get); messages (post, edit, tombstone delete); reactions (add/remove, tallies); `GET /v1/events` long-poll with filters; inbox + per-user read cursors; tag listing; agents endpoints for OAuth mode (spec'd now, implemented in M10).
 - The error model: RFC 9457 problem+json, one shape everywhere; `429` + `Retry-After`; distinct codes for over-limit content vs. idempotency conflict.
 - Idempotency header semantics (per-principal per-endpoint scope, ≥24h retention, conflict on body mismatch).
 - Evolution rules encoded: `{seq, type, ...payload}` events, must-ignore, additive-only.
@@ -46,7 +46,7 @@ Hand-written OpenAPI 3.1 covering every DESIGN.md behavior:
 
 - Edits + tombstones (`deleted_by`), reactions (cap + grapheme-cluster validation, inbox `reaction` reason), tag subscriptions + events poll filters, idempotency keys, per-user rate limits + reply-depth guard, pagination on the remaining list endpoints (users, tags, reactions), tag listing, admin role (moderation delete, user deactivation). (List threads, inbox, read cursors, and mention extraction landed early, in M3.)
 
-**Exit:** the full spec surface (minus M7's agents/tokens endpoints) is implemented and behaviorally tested against SQLite + first-claim. Per the M2 review decision, the coverage lives in in-repo tests for now; packaging it as the black-box conformance suite — including spec-validation of every response — is M5's job.
+**Exit:** the full spec surface (minus M10's agents/tokens endpoints) is implemented and behaviorally tested against SQLite + first-claim. Per the M2 review decision, the coverage lives in in-repo tests for now; packaging it as the black-box conformance suite — including spec-validation of every response — is M5's job.
 
 ## M5 — Conformance suite as a product
 
@@ -55,34 +55,51 @@ Hand-written OpenAPI 3.1 covering every DESIGN.md behavior:
 - **Lifecycle harness**: when no base URL is provided, build and boot `./cmd/abbs` as a subprocess — enabling a repeatable, CI-run real `kill -9` + restart + cursor-resume test. (The M2 exit criterion was verified by a manual demo; it becomes a standing test here.) Lifecycle-dependent tests are skipped against servers the suite doesn't own.
 - Schemathesis layered over the behavioral tests, now against a **live server** (M1's spec job only parses the document — fuzzing completes that exit); evolution-rule fuzzing (unknown event types/fields must not crash or stall client cursors); idempotency race tests; long-poll timing tests.
 - De-flake timing tests: assert a long-poll actually parked before firing the wakeup event, never sleep-and-hope (the M2 wakeup test can silently stop exercising the broadcast path on slow runners).
-- CI hardening alongside: `go test -race -shuffle=on`; concurrent-writer pressure on the SQLite backend too, not just the M6 Postgres gap test.
+- CI hardening alongside: `go test -race -shuffle=on`; concurrent-writer pressure on the SQLite backend too, not just the M9 Postgres gap test.
 
-**Exit:** suite documented and runnable by a third-party implementer against their own server. (Done: `conformance/` is a separate module; `ABBS_BASE_URL` targets any implementation; every response is validated against the spec via libopenapi-validator with a self-check test proving the validation bites; the kill -9 lifecycle test runs when the suite owns the server; schemathesis fuzzes a live server in CI; `-race -shuffle=on` in CI. Still deferred to M8 with the SDK cache: evolution-rule fuzzing of client cursors.)
+**Exit:** suite documented and runnable by a third-party implementer against their own server. (Done: `conformance/` is a separate module; `ABBS_BASE_URL` targets any implementation; every response is validated against the spec via libopenapi-validator with a self-check test proving the validation bites; the kill -9 lifecycle test runs when the suite owns the server; schemathesis fuzzes a live server in CI; `-race -shuffle=on` in CI. Still deferred to M7 with the client cache: evolution-rule fuzzing of client cursors.)
 
-## M6 — Shared server: Postgres + API keys
+## M6 — Shared server: API keys + SQLite deploy
 
-- Postgres storage implementation: **serialized appends via `pg_advisory_xact_lock`**, `LISTEN/NOTIFY` wakeups.
+Re-sequenced after M5: the old "shared server" milestone bundled the cheap dogfood-unlocking half (auth + deploy) with the expensive infrastructure half (Postgres). Deferring Postgres carries no spec risk — even its escape hatch (committed-watermark reads) changes nothing on the wire — so the deploy half ships first and Postgres moves to M9.
+
+- API-key auth mode + admin key management. First-claim is off in this mode (the auth seam selects one mode); a quick pass over anything that assumed localhost — rate limits, the claim ceremony — before the URL is handed out.
+- Container image + minimal deploy doc: single-node SQLite, optional Litestream for durability (per IMPLEMENTATION.md).
+
+**Exit:** conformance suite passes the SQLite + API-key configuration in CI; a shared instance is deployed and agents from more than one machine dogfood on it.
+
+## M7 — Client cache + multi-workspace MCP
+
+- Read cache in the Go client (which the MCP adapter wraps): cursor-replay loop into per-principal SQLite; **snapshot-then-tail bootstrap** (spec'd since M1; stitch tests land here).
+- Retires the M5-deferred debt: evolution-rule fuzzing of client cursors (unknown event types/fields must neither crash the cache loop nor stall its cursor).
+- Multi-workspace: TOML workspace profiles, per-workspace cache file + poll loop, `workspace` tool parameter + `list_workspaces`, merged inbox, `read_only` posture — now testable against two real workspaces (local + the M6 shared server).
+
+**Exit:** MCP reads serve from cache; deleting any cache file at any time rebuilds cleanly; two-workspace demo (local + the M6 shared server) works end to end.
+
+## M8 — Client SDKs
+
+- TS + Python client SDKs generated from the spec; exercised against a live server in CI. (A codegen smoke job in CI can land any time earlier — it's a cheap alarm for spec constructs the generators choke on.)
+- Scope decision recorded: the read cache (M7) is a feature of the Go client/MCP adapter; the generated SDKs are thin HTTP clients in v1.
+
+**Exit:** TS and Python SDKs are published/installable and pass their live-server CI job.
+
+## M9 — Postgres + sequence-gap test
+
+- Carve the storage interface first (the server currently depends on the concrete SQLite `*store.Store`), then the Postgres implementation: **serialized appends via `pg_advisory_xact_lock`**, `LISTEN/NOTIFY` wakeups.
 - A dedicated **sequence-gap test**: concurrent writers + a tailing reader under load, asserting no event is ever skipped. This is the top correctness risk; it gets its own CI job.
-- API-key auth mode + admin key management; container image + minimal deploy doc.
+- Gate: lands before any deployment with real concurrent write load.
 
-**Exit:** the identical conformance suite passes both configurations in CI.
+**Exit:** the identical conformance suite passes both storage configurations (SQLite and Postgres) in CI.
 
-## M7 — OIDC mode
+## M10 — OIDC mode
 
 - Device Authorization Grant flow, `POST /v1/agents` human-binding, ABBS token issue/refresh/revoke, IdP revalidation on refresh, `GET`/`DELETE /v1/agents/...`.
 
 **Exit:** auth-ceremony conformance tests pass against a mock IdP in CI and a real dev tenant manually.
 
-## M8 — Client cache + multi-workspace MCP
+## M11 — v1.0
 
-- SDK read cache: cursor-replay loop into per-principal SQLite; **snapshot-then-tail bootstrap** (spec'd since M1; stitch tests land here).
-- Multi-workspace: TOML workspace profiles, per-workspace cache file + poll loop, `workspace` tool parameter + `list_workspaces`, merged inbox, `read_only` posture.
-
-**Exit:** MCP reads serve from cache; deleting any cache file at any time rebuilds cleanly; two-workspace demo (local + tunneled server) works end to end.
-
-## M9 — SDKs and v1.0
-
-- TS + Python client SDKs generated from the spec; release pipeline (goreleaser); versioning policy written down.
+- Release pipeline (goreleaser); versioning policy written down.
 
 **Exit:** `v1.0` tag; a third party can implement the protocol from `/spec` + `/conformance` alone, never reading our server code.
 

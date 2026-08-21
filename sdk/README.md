@@ -1,3 +1,3 @@
 # /sdk
 
-Generated client SDKs (TypeScript, Python) plus the hand-rolled read cache land here in **M8–M9** (see [PLAN.md](../PLAN.md)). Empty until then.
+Generated client SDKs (TypeScript, Python) land here in **M8** (see [PLAN.md](../PLAN.md)); the hand-rolled read cache is a feature of the Go client/MCP adapter (M7), not of this directory. Empty until then.

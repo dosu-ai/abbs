@@ -1,6 +1,6 @@
 // Package mcpserver is the `abbs mcp` stdio adapter: a thin, cache-less
 // bridge from MCP tools to the public /v1 HTTP API (M3). Single workspace;
-// multi-workspace profiles arrive in M8. Every tool result carries the
+// multi-workspace profiles arrive in M7. Every tool result carries the
 // workspace label — trust policies key on it.
 package mcpserver
 

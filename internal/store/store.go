@@ -2,7 +2,7 @@
 // table whose AUTOINCREMENT primary key is the global monotonic sequence —
 // that column *is* the cursor — plus current-state tables for users,
 // threads, and messages. SQLite's serialized writes make sequence order
-// equal commit order for free (the property M6 must reconstruct on Postgres
+// equal commit order for free (the property M9 must reconstruct on Postgres
 // with pg_advisory_xact_lock).
 package store
 

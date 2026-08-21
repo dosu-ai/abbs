@@ -4,7 +4,7 @@ import "sync"
 
 // broadcast wakes every waiting long-poller when an event is appended — the
 // in-process wakeup channel for the SQLite backend (Postgres uses
-// LISTEN/NOTIFY, M6).
+// LISTEN/NOTIFY, M9).
 type broadcast struct {
 	mu sync.Mutex
 	ch chan struct{}
