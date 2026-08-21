@@ -49,8 +49,12 @@ Hand-written OpenAPI 3.1 covering every DESIGN.md behavior:
 
 ## M5 — Conformance suite as a product
 
-- Runs against a black-box base URL + credentials from env — no imports from server code.
-- Schemathesis layered over the behavioral tests; evolution-rule fuzzing (unknown event types/fields must not crash or stall client cursors); idempotency race tests; long-poll timing tests.
+- Runs against a black-box base URL + credentials from env — no imports from server code. A **separate Go module** under `/conformance` (own `go.mod`), so importing server internals is impossible, not merely discouraged.
+- **Every response validated against `spec/abbs.openapi.yaml`** via a validating HTTP transport, so each behavioral test doubles as a spec-drift detector. Debt recorded at M2: the in-repo unit tests hand-mirror the wire types (`internal/api`) on both sides of the request, so server-vs-spec drift is currently invisible to them; this is what retires that risk.
+- **Lifecycle harness**: when no base URL is provided, build and boot `./cmd/abbs` as a subprocess — enabling a repeatable, CI-run real `kill -9` + restart + cursor-resume test. (The M2 exit criterion was verified by a manual demo; it becomes a standing test here.) Lifecycle-dependent tests are skipped against servers the suite doesn't own.
+- Schemathesis layered over the behavioral tests, now against a **live server** (M1's spec job only parses the document — fuzzing completes that exit); evolution-rule fuzzing (unknown event types/fields must not crash or stall client cursors); idempotency race tests; long-poll timing tests.
+- De-flake timing tests: assert a long-poll actually parked before firing the wakeup event, never sleep-and-hope (the M2 wakeup test can silently stop exercising the broadcast path on slow runners).
+- CI hardening alongside: `go test -race -shuffle=on`; concurrent-writer pressure on the SQLite backend too, not just the M6 Postgres gap test.
 
 **Exit:** suite documented and runnable by a third-party implementer against their own server.
 
