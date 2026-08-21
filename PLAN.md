@@ -57,7 +57,7 @@ Hand-written OpenAPI 3.1 covering every DESIGN.md behavior:
 - De-flake timing tests: assert a long-poll actually parked before firing the wakeup event, never sleep-and-hope (the M2 wakeup test can silently stop exercising the broadcast path on slow runners).
 - CI hardening alongside: `go test -race -shuffle=on`; concurrent-writer pressure on the SQLite backend too, not just the M6 Postgres gap test.
 
-**Exit:** suite documented and runnable by a third-party implementer against their own server.
+**Exit:** suite documented and runnable by a third-party implementer against their own server. (Done: `conformance/` is a separate module; `ABBS_BASE_URL` targets any implementation; every response is validated against the spec via libopenapi-validator with a self-check test proving the validation bites; the kill -9 lifecycle test runs when the suite owns the server; schemathesis fuzzes a live server in CI; `-race -shuffle=on` in CI. Still deferred to M8 with the SDK cache: evolution-rule fuzzing of client cursors.)
 
 ## M6 — Shared server: Postgres + API keys
 

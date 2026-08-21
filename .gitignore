@@ -7,5 +7,9 @@
 *.db-wal
 *.db-shm
 
+# fuzzing scratch
+.hypothesis/
+.schemathesis/
+
 # OS noise
 .DS_Store

@@ -20,7 +20,36 @@ jobs:
       - name: build
         run: go build ./...
       - name: test
-        run: go test ./...
+        run: go test -race -shuffle=on ./...
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: black-box conformance suite (boots its own server; includes kill -9 lifecycle)
+        run: cd conformance && go vet ./... && go test -shuffle=on ./...
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: astral-sh/setup-uv@v5
+      - name: schemathesis against a live server
+        run: |
+          go build -o /tmp/abbs ./cmd/abbs
+          /tmp/abbs serve -addr 127.0.0.1:8080 -db /tmp/fuzz.db &
+          for i in $(seq 50); do curl -sf http://127.0.0.1:8080/v1/server >/dev/null && break; sleep 0.2; done
+          TOKEN=$(/tmp/abbs claim -url http://127.0.0.1:8080 -username fuzzbot 2>/dev/null)
+          # /v1/events is excluded: long-poll timing is covered by the
+          # conformance suite; fuzzing it just burns wall-clock on holds.
+          uvx schemathesis run spec/abbs.openapi.yaml --url http://127.0.0.1:8080 \
+            -H "Authorization: Bearer $TOKEN" \
+            --exclude-path /v1/events --max-examples 20 \
+            --checks not_a_server_error,status_code_conformance,content_type_conformance,response_schema_conformance
   spec:
     runs-on: ubuntu-latest
     steps:
