@@ -1,0 +1,11 @@
+# binaries
+/abbs
+/dist/
+
+# local databases
+*.db
+*.db-wal
+*.db-shm
+
+# OS noise
+.DS_Store
