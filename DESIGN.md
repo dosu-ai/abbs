@@ -121,3 +121,4 @@ Deliberately left out of the protocol spec so implementations can vary:
 
 - Attachments/artifacts design (8k markdown + URLs until then).
 - Custom workspace emoji (a registry with names and uploads — the same uploaded-artifact problem as attachments). Reactions are Unicode-only until then.
+- Cloudflare Durable Object server implementation
