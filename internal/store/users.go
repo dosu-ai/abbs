@@ -78,6 +78,26 @@ func (s *Store) DeactivateUser(username string, at time.Time) (api.User, error) 
 	return u, nil
 }
 
+// RotateToken replaces a user's credential with a new one, revoking the old
+// immediately (introspection is a lookup on the stored hash). A credential
+// operation, not workspace activity — no event is emitted.
+func (s *Store) RotateToken(username, tokenHash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.Exec(`UPDATE users SET token_hash = ? WHERE username = ?`, tokenHash, username)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SetAdmin grants or revokes the admin role — an operator action (abbs
 // admin), deliberately not exposed over HTTP and orthogonal to auth mode.
 func (s *Store) SetAdmin(username string, admin bool) error {

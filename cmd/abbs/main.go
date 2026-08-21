@@ -40,21 +40,36 @@ func main() {
 		}
 	}
 	fmt.Fprintln(os.Stderr, "abbs: server and MCP adapter for the Agentic Bulletin Board System")
-	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs mcp [flags] | abbs claim [flags] | abbs admin [flags] <username> | abbs version")
+	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs mcp [flags] | abbs claim [flags] | abbs admin <subcommand> | abbs version")
 	os.Exit(2)
 }
 
-// adminCmd grants or revokes the admin role — an operator action against
-// the database directly, deliberately not an HTTP endpoint (DESIGN.md:
-// granted by the server operator, orthogonal to how the admin
-// authenticated).
+const adminUsage = `usage: abbs admin <subcommand> [flags] <username>
+
+Operator actions against the database directly — deliberately not HTTP
+endpoints (DESIGN.md: the admin role is granted by the server operator,
+orthogonal to how the admin authenticated).
+
+  grant        grant the admin role
+  revoke       revoke the admin role
+  create-user  create a user and mint their API key (stdout is the key alone)
+  rotate-key   mint a replacement API key, revoking the old immediately
+`
+
 func adminCmd(args []string) {
-	fs := flag.NewFlagSet("admin", flag.ExitOnError)
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, adminUsage)
+		os.Exit(2)
+	}
+	sub, args := args[0], args[1:]
+	fs := flag.NewFlagSet("admin "+sub, flag.ExitOnError)
 	dbPath := fs.String("db", "abbs.db", "SQLite database path")
-	revoke := fs.Bool("revoke", false, "revoke the admin role instead of granting it")
+	kind := fs.String("kind", "agent", `create-user: principal kind, "human" or "agent"`)
+	displayName := fs.String("display-name", "", "create-user: optional display name")
+	admin := fs.Bool("admin", false, "create-user: also grant the admin role")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
-		log.Fatal("abbs admin: exactly one username argument required")
+		log.Fatalf("abbs admin %s: exactly one username argument required", sub)
 	}
 	username := fs.Arg(0)
 	st, err := store.Open(*dbPath)
@@ -62,13 +77,43 @@ func adminCmd(args []string) {
 		log.Fatalf("abbs admin: open store: %v", err)
 	}
 	defer st.Close()
-	if err := st.SetAdmin(username, !*revoke); err != nil {
-		log.Fatalf("abbs admin: %v", err)
-	}
-	if *revoke {
-		fmt.Printf("revoked admin from %q\n", username)
-	} else {
-		fmt.Printf("granted admin to %q\n", username)
+
+	switch sub {
+	case "grant", "revoke":
+		if err := st.SetAdmin(username, sub == "grant"); err != nil {
+			log.Fatalf("abbs admin %s: %v", sub, err)
+		}
+		if sub == "grant" {
+			fmt.Printf("granted admin to %q\n", username)
+		} else {
+			fmt.Printf("revoked admin from %q\n", username)
+		}
+	case "create-user":
+		token, tokenHash := server.NewToken()
+		var dn *string
+		if *displayName != "" {
+			dn = displayName
+		}
+		if _, err := st.ClaimUser(username, *kind, dn, tokenHash, time.Now()); err != nil {
+			log.Fatalf("abbs admin create-user: %v", err)
+		}
+		if *admin {
+			if err := st.SetAdmin(username, true); err != nil {
+				log.Fatalf("abbs admin create-user: grant admin: %v", err)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "created %q (%s) — the API key below is shown once; store it safely:\n", username, *kind)
+		fmt.Println(token)
+	case "rotate-key":
+		token, tokenHash := server.NewToken()
+		if err := st.RotateToken(username, tokenHash); err != nil {
+			log.Fatalf("abbs admin rotate-key: %v", err)
+		}
+		fmt.Fprintf(os.Stderr, "rotated the API key for %q — the old key is revoked; the new one is shown once:\n", username)
+		fmt.Println(token)
+	default:
+		fmt.Fprint(os.Stderr, adminUsage)
+		os.Exit(2)
 	}
 }
 
@@ -106,7 +151,12 @@ func serve(args []string) {
 	dbPath := fs.String("db", "abbs.db", "SQLite database path")
 	name := fs.String("workspace", "abbs", "workspace name (a workspace is a server)")
 	desc := fs.String("description", "", "workspace description")
+	authMode := fs.String("auth", server.AuthFirstClaim,
+		`auth mode: "first-claim" (anyone may claim an unclaimed name — localhost only) or "api-key" (admin-issued keys via abbs admin create-user)`)
 	fs.Parse(args)
+	if *authMode != server.AuthFirstClaim && *authMode != server.AuthAPIKey {
+		log.Fatalf("abbs serve: -auth must be %q or %q", server.AuthFirstClaim, server.AuthAPIKey)
+	}
 
 	st, err := store.Open(*dbPath)
 	if err != nil {
@@ -116,11 +166,11 @@ func serve(args []string) {
 
 	srv := &http.Server{
 		Addr:    *addr,
-		Handler: server.New(st, server.Config{WorkspaceName: *name, WorkspaceDescription: *desc}),
+		Handler: server.New(st, server.Config{WorkspaceName: *name, WorkspaceDescription: *desc, AuthMode: *authMode}),
 		// No WriteTimeout: long-polls hold connections up to 60s by design.
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("abbs serve: workspace %q at http://%s (db %s)", *name, *addr, *dbPath)
+	log.Printf("abbs serve: workspace %q at http://%s (db %s, auth %s)", *name, *addr, *dbPath, *authMode)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("abbs serve: %v", err)
 	}

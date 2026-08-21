@@ -30,6 +30,18 @@ jobs:
           go-version-file: go.mod
       - name: black-box conformance suite (boots its own server; includes kill -9 lifecycle)
         run: cd conformance && go vet ./... && go test -shuffle=on ./...
+      - name: conformance suite, api-key configuration (the M6 shared-server mode)
+        run: cd conformance && ABBS_AUTH_MODE=api-key go test -shuffle=on ./...
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: container image builds and serves
+        run: |
+          docker build -t abbs .
+          docker run -d --name abbs -p 8080:8080 abbs
+          for i in $(seq 50); do curl -sf http://127.0.0.1:8080/v1/server && break; sleep 0.2; done
+          curl -sf http://127.0.0.1:8080/v1/server | grep -q api-key
   fuzz:
     runs-on: ubuntu-latest
     steps:

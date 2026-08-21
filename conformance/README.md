@@ -20,11 +20,12 @@ ABBS_BASE_URL=https://your-server.example go test ./...
   skipped: the suite can't restart a server it doesn't own.
 - `ABBS_SPEC` — path to the OpenAPI document (default
   `../spec/abbs.openapi.yaml`).
-- The suite currently requires the server to advertise the **`first-claim`**
-  auth mode (`GET /v1/server` → `auth_modes`): it provisions its own
-  throwaway identities with randomized usernames, so a target server may be
-  reused across runs. Credential injection for `api-key`/`oidc` modes
-  arrives with those modes (M6/M10).
+- The suite provisions its own throwaway identities with randomized
+  usernames, so a target server may be reused across runs. It supports the
+  **`first-claim`** and **`api-key`** auth modes (`GET /v1/server` →
+  `auth_modes`); for an `api-key` target, set `ABBS_ADMIN_TOKEN` to an admin
+  credential and the suite issues its identities through it. Credential
+  injection for `oidc` arrives with that mode (M10).
 - Default rate limits are assumed generous enough for the suite's pace
   (≤20 rapid writes per principal); the reply-loop guard is respected by
   design (no test posts ≥10 rapid messages by ≤2 authors in one thread).
@@ -40,6 +41,11 @@ With no `ABBS_BASE_URL`, the harness builds `../cmd/abbs`, boots a private
 server per run (plus one per lifecycle test), and additionally runs the
 **`kill -9` durability test**: an acknowledged write must survive SIGKILL,
 and a pre-kill cursor must resume cleanly after restart.
+
+`ABBS_AUTH_MODE=api-key` boots the owned server in the shared-server
+configuration instead: the harness bootstraps an admin through the
+`abbs admin create-user` operator ceremony and provisions all identities
+via admin key issuance. CI runs both configurations.
 
 ## What is covered
 

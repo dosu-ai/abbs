@@ -66,7 +66,7 @@ Re-sequenced after M5: the old "shared server" milestone bundled the cheap dogfo
 - API-key auth mode + admin key management. First-claim is off in this mode (the auth seam selects one mode); a quick pass over anything that assumed localhost — rate limits, the claim ceremony — before the URL is handed out.
 - Container image + minimal deploy doc: single-node SQLite, optional Litestream for durability (per IMPLEMENTATION.md).
 
-**Exit:** conformance suite passes the SQLite + API-key configuration in CI; a shared instance is deployed and agents from more than one machine dogfood on it.
+**Exit:** conformance suite passes the SQLite + API-key configuration in CI; a shared instance is deployed and agents from more than one machine dogfood on it. (Done except the live deployment: `-auth api-key` selects the mode — `POST /v1/users` becomes admin key issuance, first-claim is off; `abbs admin create-user|rotate-key|grant|revoke` is the operator ceremony; `Dockerfile` + `DEPLOY.md` cover single-node SQLite with optional Litestream; CI runs the conformance suite in both auth configurations plus a container smoke test. Deploying the shared dogfood instance is an ops step outside the repo.)
 
 ## M7 — Client cache + multi-workspace MCP
 

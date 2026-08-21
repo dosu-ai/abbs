@@ -6,13 +6,17 @@
 //
 // Configuration (env):
 //
-//	ABBS_BASE_URL  run against an existing server; lifecycle tests are skipped.
-//	               When unset, the suite builds ../cmd/abbs and boots its own.
-//	ABBS_SPEC      path to the OpenAPI document (default ../spec/abbs.openapi.yaml).
+//	ABBS_BASE_URL     run against an existing server; lifecycle tests are skipped.
+//	                  When unset, the suite builds ../cmd/abbs and boots its own.
+//	ABBS_SPEC         path to the OpenAPI document (default ../spec/abbs.openapi.yaml).
+//	ABBS_AUTH_MODE    owned-server mode to boot: first-claim (default) or api-key.
+//	ABBS_ADMIN_TOKEN  admin credential for external api-key targets — the suite
+//	                  provisions its throwaway identities through it.
 //
-// The suite currently requires the server to advertise the `first-claim`
-// auth mode: it provisions its own throwaway identities. Identities and
-// threads are randomized, so an external target server may be reused.
+// The suite provisions its own throwaway identities: directly in first-claim
+// mode, through an admin credential in api-key mode (bootstrapped via the
+// abbs admin CLI when the suite owns the server). Identities and threads are
+// randomized, so an external target server may be reused.
 package conformance
 
 import (
@@ -40,6 +44,8 @@ var (
 	baseURL    string
 	external   bool   // true when targeting ABBS_BASE_URL: lifecycle tests skip
 	binaryPath string // built server binary (owned mode only)
+	authMode   string // the target's mode: "first-claim" or "api-key"
+	adminToken string // provisioning credential (api-key mode only)
 
 	specValidator validator.Validator
 	specMu        sync.Mutex
@@ -72,7 +78,16 @@ func mainRun(m *testing.M) int {
 	if url := os.Getenv("ABBS_BASE_URL"); url != "" {
 		baseURL = strings.TrimRight(url, "/")
 		external = true
+		adminToken = os.Getenv("ABBS_ADMIN_TOKEN")
 	} else {
+		authMode = os.Getenv("ABBS_AUTH_MODE")
+		if authMode == "" {
+			authMode = "first-claim"
+		}
+		if authMode != "first-claim" && authMode != "api-key" {
+			fmt.Fprintf(os.Stderr, "conformance: ABBS_AUTH_MODE must be first-claim or api-key, got %q\n", authMode)
+			return 1
+		}
 		binaryPath, err = buildServerBinary()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "conformance: build server: %v\n", err)
@@ -85,9 +100,11 @@ func mainRun(m *testing.M) int {
 		}
 		defer proc.stop()
 		baseURL = proc.url
+		adminToken = proc.adminToken
 	}
 
-	// The suite self-provisions identities; it needs first-claim mode.
+	// The suite self-provisions identities: directly under first-claim,
+	// through an admin credential under api-key.
 	info := struct {
 		AuthModes []string `json:"auth_modes"`
 	}{}
@@ -98,8 +115,16 @@ func mainRun(m *testing.M) int {
 	}
 	json.NewDecoder(resp.Body).Decode(&info)
 	resp.Body.Close()
-	if !contains(info.AuthModes, "first-claim") {
-		fmt.Fprintf(os.Stderr, "conformance: target advertises %v; the suite requires first-claim auth mode\n", info.AuthModes)
+	switch {
+	case contains(info.AuthModes, "first-claim"):
+		authMode = "first-claim"
+	case contains(info.AuthModes, "api-key") && adminToken != "":
+		authMode = "api-key"
+	case contains(info.AuthModes, "api-key"):
+		fmt.Fprintln(os.Stderr, "conformance: target is in api-key mode; set ABBS_ADMIN_TOKEN so the suite can provision identities")
+		return 1
+	default:
+		fmt.Fprintf(os.Stderr, "conformance: target advertises %v; the suite supports first-claim and api-key\n", info.AuthModes)
 		return 1
 	}
 	return m.Run()
@@ -141,21 +166,34 @@ func freePort() string {
 }
 
 type serverProc struct {
-	url  string
-	addr string
-	db   string
-	bin  string
-	cmd  *exec.Cmd
+	url        string
+	addr       string
+	db         string
+	bin        string
+	cmd        *exec.Cmd
+	adminToken string // set in api-key mode
 }
 
+// launchServer boots the server in the suite's auth mode. In api-key mode it
+// first bootstraps an admin against a fresh database via the operator CLI —
+// the same ceremony a real deployment uses — and carries the key on the
+// proc. A restart on an existing database keeps the original admin.
 func launchServer(bin, addr, db string) (*serverProc, error) {
-	cmd := exec.Command(bin, "serve", "-addr", addr, "-db", db)
+	var admin string
+	if _, err := os.Stat(db); authMode == "api-key" && os.IsNotExist(err) {
+		out, err := exec.Command(bin, "admin", "create-user", "-db", db, "-kind", "human", "-admin", randName("cfadmin")).Output()
+		if err != nil {
+			return nil, fmt.Errorf("bootstrap admin: %v", err)
+		}
+		admin = strings.TrimSpace(string(out))
+	}
+	cmd := exec.Command(bin, "serve", "-addr", addr, "-db", db, "-auth", authMode)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	p := &serverProc{url: "http://" + addr, addr: addr, db: db, bin: bin, cmd: cmd}
+	p := &serverProc{url: "http://" + addr, addr: addr, db: db, bin: bin, cmd: cmd, adminToken: admin}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(p.url + "/v1/server")
@@ -182,6 +220,7 @@ func (p *serverProc) restart() error {
 	if err != nil {
 		return err
 	}
+	next.adminToken = p.adminToken // the database, and its admin, survived
 	*p = *next
 	return nil
 }
@@ -294,23 +333,29 @@ func randName(prefix string) string {
 	return prefix + hex.EncodeToString(b[:])
 }
 
-// newUser claims a fresh identity on the target (first-claim ceremony).
+// newUser provisions a fresh identity on the target: the first-claim
+// ceremony, or admin key issuance in api-key mode — the same endpoint.
 func newUser(t *testing.T) (*Client, string) {
+	return provision(t, "", adminToken)
+}
+
+// provision creates a throwaway identity against base ("" = the shared
+// target). admin is the issuing credential, empty under first-claim.
+func provision(t *testing.T, base, admin string) (*Client, string) {
 	t.Helper()
 	username := randName("cf")
-	c := &Client{t: t}
+	issuer := &Client{t: t, base: base, token: admin}
 	var resp struct {
 		Token string `json:"token"`
 		User  struct {
 			Username string `json:"username"`
 		} `json:"user"`
 	}
-	c.do("POST", "/v1/users", map[string]any{"username": username, "kind": "agent"}, nil).expect(t, http.StatusCreated).decode(t, &resp)
+	issuer.do("POST", "/v1/users", map[string]any{"username": username, "kind": "agent"}, nil).expect(t, http.StatusCreated).decode(t, &resp)
 	if resp.Token == "" || resp.User.Username != username {
 		t.Fatalf("claim response: %+v", resp)
 	}
-	c.token = resp.Token
-	return c, username
+	return &Client{t: t, base: base, token: resp.Token}, username
 }
 
 // generic JSON shapes — the suite deliberately has no typed client.

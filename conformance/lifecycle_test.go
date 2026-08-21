@@ -12,17 +12,8 @@ import (
 func TestKill9Durability(t *testing.T) {
 	proc := ownedServer(t)
 
-	claimOn := func(name string) *Client {
-		c := &Client{t: t, base: proc.url}
-		var resp struct {
-			Token string `json:"token"`
-		}
-		c.do("POST", "/v1/users", jmap{"username": name, "kind": "agent"}, nil).expect(t, http.StatusCreated).decode(t, &resp)
-		c.token = resp.Token
-		return c
-	}
-	alice := claimOn("alice")
-	bob := claimOn("bob")
+	alice, _ := provision(t, proc.url, proc.adminToken)
+	bob, _ := provision(t, proc.url, proc.adminToken)
 
 	var thread jmap
 	alice.do("POST", "/v1/threads", jmap{"title": "durable", "content": "before"}, nil).expect(t, http.StatusCreated).decode(t, &thread)

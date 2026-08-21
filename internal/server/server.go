@@ -28,10 +28,21 @@ import (
 
 var usernameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
 
+// Auth modes selectable at serve time. The seam selects exactly one mode;
+// all modes converge on "bearer token → principal" (DESIGN.md).
+const (
+	AuthFirstClaim = "first-claim" // anyone may claim an unclaimed name
+	AuthAPIKey     = "api-key"     // admin-issued static keys; claiming is off
+)
+
 // Config tunes a server instance. Zero values take documented defaults.
 type Config struct {
 	WorkspaceName        string
 	WorkspaceDescription string
+
+	// AuthMode selects the credential ceremony: AuthFirstClaim (default)
+	// or AuthAPIKey.
+	AuthMode string
 
 	// Per-user write rate limit: token bucket.
 	WriteBurst        int     // default 60
@@ -47,6 +58,9 @@ type Config struct {
 func (c Config) withDefaults() Config {
 	if c.WorkspaceName == "" {
 		c.WorkspaceName = "abbs"
+	}
+	if c.AuthMode == "" {
+		c.AuthMode = AuthFirstClaim
 	}
 	if c.WriteBurst == 0 {
 		c.WriteBurst = 60
@@ -83,7 +97,7 @@ func New(st *store.Store, cfg Config) http.Handler {
 		info: api.ServerInfo{
 			APIVersion: "v1",
 			Workspace:  api.Workspace{Name: cfg.WorkspaceName, Description: cfg.WorkspaceDescription},
-			AuthModes:  []string{"first-claim"},
+			AuthModes:  []string{cfg.AuthMode},
 			Limits:     limits,
 		},
 	}
@@ -126,10 +140,11 @@ func New(st *store.Store, cfg Config) http.Handler {
 	})
 }
 
-// newToken mints an opaque bearer token and its storage hash. Tokens are
+// NewToken mints an opaque bearer token and its storage hash. Tokens are
 // random strings stored hashed; introspection is a DB lookup, revocation is
-// immediate.
-func newToken() (token, tokenHash string) {
+// immediate. Exported for the abbs admin CLI, which mints API keys against
+// the database directly.
+func NewToken() (token, tokenHash string) {
 	var raw [24]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		panic(err)
@@ -185,6 +200,20 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleClaimUser(w http.ResponseWriter, r *http.Request) {
+	// The endpoint is the credential ceremony for both modes: first-claim
+	// lets anyone claim an unclaimed name; api-key mode turns it into
+	// admin-issued key provisioning and rejects everyone else.
+	if s.cfg.AuthMode != AuthFirstClaim {
+		actor, ok := s.authenticate(w, r)
+		if !ok {
+			return
+		}
+		if !actor.Admin {
+			writeProblem(w, http.StatusForbidden, "forbidden",
+				"first-claim is disabled on this server; user creation requires an admin API key")
+			return
+		}
+	}
 	var req api.ClaimUserRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -201,7 +230,7 @@ func (s *Server) handleClaimUser(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "validation", "display_name over 100 characters")
 		return
 	}
-	token, tokenHash := newToken()
+	token, tokenHash := NewToken()
 	user, err := s.store.ClaimUser(req.Username, req.Kind, req.DisplayName, tokenHash, time.Now())
 	if errors.Is(err, store.ErrUsernameTaken) {
 		writeProblem(w, http.StatusConflict, "username-taken", fmt.Sprintf("%q is already claimed", req.Username))

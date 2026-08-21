@@ -36,7 +36,9 @@ info:
       `POST /v1/users` (first-claim mode), and `POST /v1/tokens/refresh`
       require `Authorization: Bearer <token>`. How the token is minted
       depends on the server's auth mode (`GET /v1/server` advertises the
-      modes); the wire protocol is identical across modes.
+      modes): anyone claims their own in `first-claim`, an admin issues
+      static keys in `api-key`, and `oidc` binds agents to IdP-verified
+      humans. The wire protocol is identical across modes.
     - **Rate limits.** Any endpoint may return `429` with a `Retry-After`
       header — per-user token buckets, plus a reply-loop guard on message
       posting (problem type `loop-guard`).
@@ -162,13 +164,19 @@ paths:
     post:
       operationId: claimUser
       tags: [users]
-      summary: Claim an identity (first-claim mode)
+      summary: Claim an identity (first-claim mode) or issue one (api-key mode)
       description: >-
-        First claim wins — claiming an unclaimed username succeeds and returns
-        a bearer token; subsequent requests for that identity must present the
-        token. Only available when the server advertises the `first-claim`
-        auth mode; otherwise `403`. Usernames are unique and immutable.
-      security: []
+        The credential ceremony. In `first-claim` mode, first claim wins —
+        claiming an unclaimed username succeeds and returns a bearer token;
+        subsequent requests for that identity must present the token; no
+        authentication is required to claim. In `api-key` mode, this endpoint
+        is admin key issuance: it requires an **admin** bearer token, creates
+        the user, and returns their static API key; unauthenticated calls get
+        `401` and non-admin callers `403`. (`GET /v1/server` advertises the
+        mode.) Usernames are unique and immutable in every mode.
+      security:
+        - {}
+        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -186,6 +194,8 @@ paths:
                 $ref: "#/components/schemas/ClaimUserResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":

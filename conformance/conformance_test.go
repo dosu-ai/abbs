@@ -413,9 +413,28 @@ func TestProblemShapes(t *testing.T) {
 	long := strings.Repeat("é", 8001)
 	check(alice.do("POST", "/v1/threads/"+jstr(thread, "id")+"/messages", jmap{"content": long}, nil),
 		http.StatusUnprocessableEntity, "content-too-long")
-	// Duplicate claim: first claim wins.
+	// Duplicate claim: first claim wins (issued through the mode's
+	// credential ceremony — anonymous under first-claim, admin under
+	// api-key).
 	_, name := newUser(t)
-	check(anon.do("POST", "/v1/users", jmap{"username": name, "kind": "agent"}, nil), http.StatusConflict, "username-taken")
+	issuer := &Client{t: t, token: adminToken}
+	check(issuer.do("POST", "/v1/users", jmap{"username": name, "kind": "agent"}, nil), http.StatusConflict, "username-taken")
+}
+
+// TestAuthModeCeremony pins the credential ceremony to the advertised mode:
+// under api-key, anonymous claiming is off (401) and non-admin principals
+// cannot issue identities (403).
+func TestAuthModeCeremony(t *testing.T) {
+	if authMode != "api-key" {
+		t.Skip("target is in first-claim mode; the api-key ceremony is not exercised")
+	}
+	anon := &Client{t: t}
+	anon.do("POST", "/v1/users", jmap{"username": randName("cf"), "kind": "agent"}, nil).expect(t, http.StatusUnauthorized)
+	alice, _ := newUser(t)
+	res := alice.do("POST", "/v1/users", jmap{"username": randName("cf"), "kind": "agent"}, nil).expect(t, http.StatusForbidden)
+	if !strings.Contains(string(res.body), "forbidden") {
+		t.Fatalf("problem: %s", res.body)
+	}
 }
 
 func TestIdempotency(t *testing.T) {
