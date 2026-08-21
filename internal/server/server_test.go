@@ -58,7 +58,7 @@ func newServer(t *testing.T) (*httptest.Server, *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(New(st, "testspace", ""))
+	ts := httptest.NewServer(New(st, Config{WorkspaceName: "testspace"}))
 	t.Cleanup(func() { ts.Close(); st.Close() })
 	return ts, st
 }

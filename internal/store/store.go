@@ -24,8 +24,11 @@ import (
 )
 
 var (
-	ErrNotFound      = errors.New("not found")
-	ErrUsernameTaken = errors.New("username taken")
+	ErrNotFound       = errors.New("not found")
+	ErrUsernameTaken  = errors.New("username taken")
+	ErrForbidden      = errors.New("forbidden")
+	ErrMessageDeleted = errors.New("message is tombstoned")
+	ErrReactionLimit  = errors.New("reaction limit reached")
 )
 
 // ErrUnknownParticipant reports a DM participant that is not a user.
@@ -102,6 +105,31 @@ CREATE TABLE IF NOT EXISTS read_cursors (
 	thread_id TEXT NOT NULL,
 	seq       INTEGER NOT NULL,
 	PRIMARY KEY (username, thread_id)
+);
+CREATE TABLE IF NOT EXISTS reactions (
+	message_id TEXT NOT NULL,
+	username   TEXT NOT NULL,
+	emoji      TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	seq        INTEGER NOT NULL,
+	PRIMARY KEY (message_id, username, emoji)
+);
+CREATE INDEX IF NOT EXISTS idx_reactions_seq ON reactions (message_id, seq);
+CREATE TABLE IF NOT EXISTS tag_subscriptions (
+	username TEXT NOT NULL,
+	tag      TEXT NOT NULL,
+	PRIMARY KEY (username, tag)
+);
+CREATE TABLE IF NOT EXISTS idempotency (
+	principal    TEXT NOT NULL,
+	endpoint     TEXT NOT NULL,
+	key          TEXT NOT NULL,
+	request_hash TEXT NOT NULL,
+	status       INTEGER NOT NULL,
+	content_type TEXT NOT NULL,
+	body         BLOB NOT NULL,
+	created_ns   INTEGER NOT NULL,
+	PRIMARY KEY (principal, endpoint, key)
 );
 `
 
@@ -624,7 +652,32 @@ func (s *Store) ListMessages(threadID, viewer string, after int64, limit int) (i
 		tok := seqToken(createdSeqs[limit-1])
 		nextPage = &tok
 	}
+	for i := range items {
+		if items[i].Reactions, err = tallies(s.db, items[i].ID); err != nil {
+			return nil, nil, "", err
+		}
+	}
 	return items, nextPage, asOf, nil
+}
+
+// tallies returns a message's per-emoji reaction counts, largest first.
+func tallies(q querier, messageID string) ([]api.ReactionTally, error) {
+	rows, err := q.Query(
+		`SELECT emoji, COUNT(*) FROM reactions WHERE message_id = ? GROUP BY emoji ORDER BY COUNT(*) DESC, emoji`,
+		messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []api.ReactionTally{}
+	for rows.Next() {
+		var t api.ReactionTally
+		if err := rows.Scan(&t.Emoji, &t.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // ListThreads pages through the viewer's visible threads, most recent
@@ -691,8 +744,11 @@ func (s *Store) ListThreads(viewer string, since, before int64, tags []string, l
 
 // Inbox pages through "what needs me": visible threads with activity past
 // the viewer's read cursor, where the viewer is a DM participant, a public-
-// thread participant (creator or has posted), or has an unread mention.
-// Ordered by most recent activity first; before is the page anchor.
+// thread participant (creator or has posted), or has an unread mention —
+// plus threads holding unread reactions (by others) to the viewer's own
+// messages, which count for the inbox even though they never advance the
+// thread's activity cursor. Ordered by most recent inbox-relevant event
+// (updated_seq) first; before is the page anchor.
 func (s *Store) Inbox(viewer string, before int64, limit int) (items []api.InboxItem, nextPage *string, asOf string, err error) {
 	cur, err := s.CurrentSeq()
 	if err != nil {
@@ -700,25 +756,37 @@ func (s *Store) Inbox(viewer string, before int64, limit int) (items []api.Inbox
 	}
 	asOf = seqToken(cur)
 
-	query := `SELECT t.id, t.kind, t.title, t.tags, t.creator, t.created_at, t.created_seq, t.last_activity_seq,
-			rc.seq,
+	query := `SELECT * FROM (
+		SELECT t.id, t.kind, t.title, t.tags, t.creator, t.created_at, t.created_seq, t.last_activity_seq,
+			rc.seq AS read_seq,
 			EXISTS (SELECT 1 FROM mentions mn WHERE mn.thread_id = t.id AND mn.username = ? AND mn.seq > COALESCE(rc.seq, 0)) AS has_mention,
-			(t.creator = ? OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.author = ?)) AS is_participant
+			(t.creator = ? OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.author = ?)) AS is_participant,
+			(SELECT MAX(r.seq) FROM reactions r JOIN messages m ON m.id = r.message_id
+			 WHERE m.thread_id = t.id AND m.author = ? AND r.username != ? AND r.seq > COALESCE(rc.seq, 0)) AS unread_reaction_seq,
+			MAX(CASE WHEN t.last_activity_seq > COALESCE(rc.seq, 0) THEN t.last_activity_seq ELSE 0 END,
+			    COALESCE((SELECT MAX(r.seq) FROM reactions r JOIN messages m ON m.id = r.message_id
+			              WHERE m.thread_id = t.id AND m.author = ? AND r.username != ? AND r.seq > COALESCE(rc.seq, 0)), 0)) AS updated_seq
 		 FROM threads t
 		 LEFT JOIN read_cursors rc ON rc.thread_id = t.id AND rc.username = ?
-		 WHERE t.last_activity_seq > COALESCE(rc.seq, 0)
-		   AND (t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))
-		   AND (t.kind = 'dm'
-		        OR t.creator = ?
-		        OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.author = ?)
-		        OR EXISTS (SELECT 1 FROM mentions mn WHERE mn.thread_id = t.id AND mn.username = ? AND mn.seq > COALESCE(rc.seq, 0)))`
-	args := []any{viewer, viewer, viewer, viewer, viewer, viewer, viewer, viewer}
-	if before > 0 {
-		query += ` AND t.last_activity_seq < ?`
-		args = append(args, before)
+		 WHERE (t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))
+		   AND ((t.last_activity_seq > COALESCE(rc.seq, 0)
+		         AND (t.kind = 'dm'
+		              OR t.creator = ?
+		              OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.author = ?)
+		              OR EXISTS (SELECT 1 FROM mentions mn WHERE mn.thread_id = t.id AND mn.username = ? AND mn.seq > COALESCE(rc.seq, 0))))
+		        OR (SELECT MAX(r.seq) FROM reactions r JOIN messages m ON m.id = r.message_id
+		            WHERE m.thread_id = t.id AND m.author = ? AND r.username != ? AND r.seq > COALESCE(rc.seq, 0)) IS NOT NULL)
+	) WHERE (? = 0 OR updated_seq < ?) ORDER BY updated_seq DESC LIMIT ?`
+	args := []any{
+		viewer, viewer, viewer, // has_mention, is_participant
+		viewer, viewer, // unread_reaction_seq
+		viewer, viewer, // updated_seq reaction component
+		viewer,                 // read_cursors join
+		viewer,                 // visibility
+		viewer, viewer, viewer, // activity relevance
+		viewer, viewer, // inclusion reaction component
+		before, before, limit + 1,
 	}
-	query += ` ORDER BY t.last_activity_seq DESC LIMIT ?`
-	args = append(args, limit+1)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -730,11 +798,12 @@ func (s *Store) Inbox(viewer string, before int64, limit int) (items []api.Inbox
 	for rows.Next() {
 		var it api.InboxItem
 		var tagsJSON string
-		var createdSeq, lastActivitySeq int64
-		var readSeq sql.NullInt64
+		var createdSeq, lastActivitySeq, updatedSeq int64
+		var readSeq, unreadReaction sql.NullInt64
 		var hasMention, isParticipant int
 		if err := rows.Scan(&it.Thread.ID, &it.Thread.Kind, &it.Thread.Title, &tagsJSON, &it.Thread.Creator,
-			&it.Thread.CreatedAt, &createdSeq, &lastActivitySeq, &readSeq, &hasMention, &isParticipant); err != nil {
+			&it.Thread.CreatedAt, &createdSeq, &lastActivitySeq, &readSeq, &hasMention, &isParticipant,
+			&unreadReaction, &updatedSeq); err != nil {
 			return nil, nil, "", err
 		}
 		if err := json.Unmarshal([]byte(tagsJSON), &it.Thread.Tags); err != nil {
@@ -742,18 +811,24 @@ func (s *Store) Inbox(viewer string, before int64, limit int) (items []api.Inbox
 		}
 		it.Thread.CreatedSeq = seqToken(createdSeq)
 		it.Thread.LastActivitySeq = seqToken(lastActivitySeq)
-		it.UpdatedSeq = it.Thread.LastActivitySeq
+		it.UpdatedSeq = seqToken(updatedSeq)
 		if readSeq.Valid {
 			tok := seqToken(readSeq.Int64)
 			it.LastReadSeq = &tok
 		}
+		activityUnread := lastActivitySeq > readSeq.Int64 // Int64 is 0 when null
 		if hasMention != 0 {
 			it.Reasons = append(it.Reasons, "mention")
 		}
-		if it.Thread.Kind == "dm" {
-			it.Reasons = append(it.Reasons, "dm")
-		} else if isParticipant != 0 {
-			it.Reasons = append(it.Reasons, "participant")
+		if activityUnread {
+			if it.Thread.Kind == "dm" {
+				it.Reasons = append(it.Reasons, "dm")
+			} else if isParticipant != 0 {
+				it.Reasons = append(it.Reasons, "participant")
+			}
+		}
+		if unreadReaction.Valid {
+			it.Reasons = append(it.Reasons, "reaction")
 		}
 		items = append(items, it)
 	}
@@ -762,7 +837,7 @@ func (s *Store) Inbox(viewer string, before int64, limit int) (items []api.Inbox
 	}
 	if len(items) > limit {
 		items = items[:limit]
-		tok := items[limit-1].Thread.LastActivitySeq
+		tok := items[limit-1].UpdatedSeq
 		nextPage = &tok
 	}
 	for i := range items {
@@ -821,19 +896,56 @@ func (s *Store) CurrentSeq() (int64, error) {
 	return cur, err
 }
 
+// EventFilter narrows the events poll — several filters combine as a
+// union; the zero value means unfiltered.
+type EventFilter struct {
+	Mentions       bool     // events whose message mentions the viewer
+	DMs            bool     // events in the viewer's DM threads
+	SubscribedTags bool     // events in threads carrying a tag the viewer subscribes to
+	Tags           []string // events in threads carrying any of these tags
+}
+
+func (f EventFilter) active() bool {
+	return f.Mentions || f.DMs || f.SubscribedTags || len(f.Tags) > 0
+}
+
 // Events returns up to limit events after the cursor, restricted to the
 // viewer's visible slice: everything except DM threads they are not in.
 // The returned cursor is the last event's seq, or the request cursor when
 // the batch is empty (the dumb-and-safe echo).
-func (s *Store) Events(viewer string, after int64, limit int) ([]api.Event, string, error) {
-	rows, err := s.db.Query(
-		`SELECT e.seq, e.type, e.occurred_at, e.payload
+func (s *Store) Events(viewer string, after int64, limit int, f EventFilter) ([]api.Event, string, error) {
+	query := `SELECT e.seq, e.type, e.occurred_at, e.payload
 		 FROM events e LEFT JOIN threads t ON t.id = e.thread_id
 		 WHERE e.seq > ?
 		   AND (e.thread_id IS NULL OR t.kind = 'public'
-		        OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = e.thread_id AND p.username = ?))
-		 ORDER BY e.seq LIMIT ?`,
-		after, viewer, limit)
+		        OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = e.thread_id AND p.username = ?))`
+	args := []any{after, viewer}
+	if f.active() {
+		var clauses []string
+		if f.Mentions {
+			clauses = append(clauses, `e.seq IN (SELECT seq FROM mentions WHERE username = ?)`)
+			args = append(args, viewer)
+		}
+		if f.DMs {
+			clauses = append(clauses, `e.thread_id IN (SELECT thread_id FROM thread_participants WHERE username = ?)`)
+			args = append(args, viewer)
+		}
+		if f.SubscribedTags {
+			clauses = append(clauses, `e.thread_id IN (SELECT tt.thread_id FROM thread_tags tt JOIN tag_subscriptions ts ON ts.tag = tt.tag WHERE ts.username = ?)`)
+			args = append(args, viewer)
+		}
+		if len(f.Tags) > 0 {
+			clauses = append(clauses, `e.thread_id IN (SELECT thread_id FROM thread_tags WHERE tag IN (?`+strings.Repeat(", ?", len(f.Tags)-1)+`))`)
+			for _, tag := range f.Tags {
+				args = append(args, tag)
+			}
+		}
+		query += ` AND (` + strings.Join(clauses, " OR ") + `)`
+	}
+	query += ` ORDER BY e.seq LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, "", err
 	}

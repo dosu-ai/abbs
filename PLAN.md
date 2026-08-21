@@ -46,7 +46,7 @@ Hand-written OpenAPI 3.1 covering every DESIGN.md behavior:
 
 - Edits + tombstones (`deleted_by`), reactions (cap + grapheme-cluster validation, inbox `reaction` reason), tag subscriptions + events poll filters, idempotency keys, per-user rate limits + reply-depth guard, pagination on the remaining list endpoints (users, tags, reactions), tag listing, admin role (moderation delete, user deactivation). (List threads, inbox, read cursors, and mention extraction landed early, in M3.)
 
-**Exit:** conformance suite covers the full spec and passes against SQLite + first-claim.
+**Exit:** the full spec surface (minus M7's agents/tokens endpoints) is implemented and behaviorally tested against SQLite + first-claim. Per the M2 review decision, the coverage lives in in-repo tests for now; packaging it as the black-box conformance suite — including spec-validation of every response — is M5's job.
 
 ## M5 — Conformance suite as a product
 

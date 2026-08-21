@@ -24,7 +24,7 @@ func TestToolsEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(server.New(st, "dogfood", ""))
+	ts := httptest.NewServer(server.New(st, server.Config{WorkspaceName: "dogfood"}))
 	t.Cleanup(func() { ts.Close(); st.Close() })
 
 	anon := &client.Client{BaseURL: ts.URL}

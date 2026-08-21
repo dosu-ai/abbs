@@ -47,7 +47,7 @@ func TestConversationAndCursors(t *testing.T) {
 		t.Fatalf("post: %v", err)
 	}
 
-	events, cursor, err := s.Events("bob", 0, 100)
+	events, cursor, err := s.Events("bob", 0, 100, EventFilter{})
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestConversationAndCursors(t *testing.T) {
 
 	// Resume from a mid-stream cursor: only later events return.
 	mid, _ := ParseSeq(first.Seq)
-	tail, _, err := s.Events("bob", mid, 100)
+	tail, _, err := s.Events("bob", mid, 100, EventFilter{})
 	if err != nil {
 		t.Fatalf("tail events: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestConversationAndCursors(t *testing.T) {
 
 	// Empty batch echoes the cursor.
 	last, _ := ParseSeq(cursor)
-	none, echo, err := s.Events("bob", last, 100)
+	none, echo, err := s.Events("bob", last, 100, EventFilter{})
 	if err != nil || len(none) != 0 || echo != cursor {
 		t.Fatalf("echo: events=%v cursor=%s err=%v, want empty batch echoing %s", none, echo, err, cursor)
 	}
@@ -105,7 +105,7 @@ func TestDMVisibility(t *testing.T) {
 		t.Errorf("carol posted to the DM: %v", err)
 	}
 
-	carolEvents, _, err := s.Events("carol", 0, 100)
+	carolEvents, _, err := s.Events("carol", 0, 100, EventFilter{})
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestDMVisibility(t *testing.T) {
 			t.Errorf("carol's stream leaks a DM event: %v", ev)
 		}
 	}
-	bobEvents, _, err := s.Events("bob", 0, 100)
+	bobEvents, _, err := s.Events("bob", 0, 100, EventFilter{})
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestDurabilityAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	_, preCursor, err := s.Events("alice", 0, 100)
+	_, preCursor, err := s.Events("alice", 0, 100, EventFilter{})
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestDurabilityAcrossReopen(t *testing.T) {
 	if post <= pre {
 		t.Fatalf("sequence went backwards across restart: %d <= %d", post, pre)
 	}
-	tail, _, err := s2.Events("alice", pre, 100)
+	tail, _, err := s2.Events("alice", pre, 100, EventFilter{})
 	if err != nil {
 		t.Fatalf("tail: %v", err)
 	}

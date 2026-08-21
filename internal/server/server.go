@@ -1,7 +1,9 @@
-// Package server implements the /v1 HTTP surface over a store. M2 scope:
-// discovery, first-claim identity, create thread, post message, read
-// thread, and the unfiltered events long-poll. The rest of the spec lands
-// in M4.
+// Package server implements the /v1 HTTP surface over a store: the full M4
+// SQLite + first-claim configuration — threads, messages (edits,
+// tombstones), reactions, tags and subscriptions, inbox and read cursors,
+// filtered events long-poll, idempotency keys, per-user rate limits, the
+// reply-loop guard, and the admin role. OAuth-mode agents endpoints arrive
+// in M7.
 package server
 
 import (
@@ -16,6 +18,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -25,20 +28,61 @@ import (
 
 var usernameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
 
-type Server struct {
-	store  *store.Store
-	info   api.ServerInfo
-	limits api.Limits
+// Config tunes a server instance. Zero values take documented defaults.
+type Config struct {
+	WorkspaceName        string
+	WorkspaceDescription string
+
+	// Per-user write rate limit: token bucket.
+	WriteBurst        int     // default 60
+	WriteRefillPerSec float64 // default 1
+
+	// Reply-loop guard: posting is rejected when the thread's last
+	// LoopGuardMessages messages plus this one are authored by ≤2 distinct
+	// users within LoopGuardWindow — the two-agents-ping-ponging shape.
+	LoopGuardMessages int           // default 10
+	LoopGuardWindow   time.Duration // default 2m
 }
 
-func New(st *store.Store, workspaceName, workspaceDescription string) http.Handler {
+func (c Config) withDefaults() Config {
+	if c.WorkspaceName == "" {
+		c.WorkspaceName = "abbs"
+	}
+	if c.WriteBurst == 0 {
+		c.WriteBurst = 60
+	}
+	if c.WriteRefillPerSec == 0 {
+		c.WriteRefillPerSec = 1
+	}
+	if c.LoopGuardMessages == 0 {
+		c.LoopGuardMessages = 10
+	}
+	if c.LoopGuardWindow == 0 {
+		c.LoopGuardWindow = 2 * time.Minute
+	}
+	return c
+}
+
+type Server struct {
+	store     *store.Store
+	cfg       Config
+	info      api.ServerInfo
+	limits    api.Limits
+	limiter   *limiter
+	idemLocks sync.Map // (principal, endpoint, key) -> *sync.Mutex
+}
+
+func New(st *store.Store, cfg Config) http.Handler {
+	cfg = cfg.withDefaults()
 	limits := api.DefaultLimits()
 	s := &Server{
-		store:  st,
-		limits: limits,
+		store:   st,
+		cfg:     cfg,
+		limits:  limits,
+		limiter: newLimiter(cfg.WriteBurst, cfg.WriteRefillPerSec),
 		info: api.ServerInfo{
 			APIVersion: "v1",
-			Workspace:  api.Workspace{Name: workspaceName, Description: workspaceDescription},
+			Workspace:  api.Workspace{Name: cfg.WorkspaceName, Description: cfg.WorkspaceDescription},
 			AuthModes:  []string{"first-claim"},
 			Limits:     limits,
 		},
@@ -46,14 +90,28 @@ func New(st *store.Store, workspaceName, workspaceDescription string) http.Handl
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/server", s.handleGetServer)
-	mux.HandleFunc("POST /v1/users", s.handleClaimUser)
-	mux.HandleFunc("POST /v1/threads", s.handleCreateThread)
+	mux.HandleFunc("POST /v1/users", s.write("POST /v1/users", s.handleClaimUser))
+	mux.HandleFunc("GET /v1/users", s.handleListUsers)
+	mux.HandleFunc("GET /v1/users/{username}", s.handleGetUser)
+	mux.HandleFunc("POST /v1/users/{username}/deactivate", s.write("POST /v1/users/{username}/deactivate", s.handleDeactivateUser))
+	mux.HandleFunc("POST /v1/threads", s.write("POST /v1/threads", s.handleCreateThread))
 	mux.HandleFunc("GET /v1/threads", s.handleListThreads)
 	mux.HandleFunc("GET /v1/threads/{thread_id}", s.handleGetThread)
+	mux.HandleFunc("PATCH /v1/threads/{thread_id}", s.write("PATCH /v1/threads/{thread_id}", s.handleUpdateThreadTags))
 	mux.HandleFunc("GET /v1/threads/{thread_id}/messages", s.handleListMessages)
-	mux.HandleFunc("POST /v1/threads/{thread_id}/messages", s.handlePostMessage)
+	mux.HandleFunc("POST /v1/threads/{thread_id}/messages", s.write("POST /v1/threads/{thread_id}/messages", s.handlePostMessage))
 	mux.HandleFunc("GET /v1/threads/{thread_id}/read-cursor", s.handleGetReadCursor)
-	mux.HandleFunc("PUT /v1/threads/{thread_id}/read-cursor", s.handleSetReadCursor)
+	mux.HandleFunc("PUT /v1/threads/{thread_id}/read-cursor", s.write("PUT /v1/threads/{thread_id}/read-cursor", s.handleSetReadCursor))
+	mux.HandleFunc("GET /v1/messages/{message_id}", s.handleGetMessage)
+	mux.HandleFunc("PATCH /v1/messages/{message_id}", s.write("PATCH /v1/messages/{message_id}", s.handleEditMessage))
+	mux.HandleFunc("DELETE /v1/messages/{message_id}", s.write("DELETE /v1/messages/{message_id}", s.handleDeleteMessage))
+	mux.HandleFunc("GET /v1/messages/{message_id}/reactions", s.handleListReactions)
+	mux.HandleFunc("PUT /v1/messages/{message_id}/reactions/{emoji}", s.write("PUT /v1/messages/{message_id}/reactions/{emoji}", s.handleAddReaction))
+	mux.HandleFunc("DELETE /v1/messages/{message_id}/reactions/{emoji}", s.write("DELETE /v1/messages/{message_id}/reactions/{emoji}", s.handleRemoveReaction))
+	mux.HandleFunc("GET /v1/tags", s.handleListTags)
+	mux.HandleFunc("GET /v1/tag-subscriptions", s.handleListTagSubscriptions)
+	mux.HandleFunc("PUT /v1/tag-subscriptions/{tag}", s.write("PUT /v1/tag-subscriptions/{tag}", s.handleSubscribeTag))
+	mux.HandleFunc("DELETE /v1/tag-subscriptions/{tag}", s.write("DELETE /v1/tag-subscriptions/{tag}", s.handleUnsubscribeTag))
 	mux.HandleFunc("GET /v1/inbox", s.handleInbox)
 	mux.HandleFunc("GET /v1/events", s.handleEvents)
 
@@ -85,11 +143,16 @@ func hashToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func bearerToken(r *http.Request) (string, bool) {
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return token, ok && token != ""
+}
+
 // authenticate resolves the bearer token to a principal, writing the 401
 // problem itself when it fails.
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (api.User, bool) {
-	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || token == "" {
+	token, ok := bearerToken(r)
+	if !ok {
 		writeProblem(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
 		return api.User{}, false
 	}
@@ -278,7 +341,34 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if !s.checkContent(w, req.Content) {
 		return
 	}
-	msg, err := s.store.PostMessage(r.PathValue("thread_id"), user.Username, req.Content, time.Now())
+	threadID := r.PathValue("thread_id")
+
+	// Reply-loop guard: the last N messages plus this one, authored by ≤2
+	// distinct users, inside the window — the runaway agent-pair shape.
+	// Rapid legitimate dialogs are distinguished by pace, not by content.
+	authors, oldest, err := s.store.LastAuthors(threadID, s.cfg.LoopGuardMessages)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	if len(authors) == s.cfg.LoopGuardMessages && time.Since(oldest) < s.cfg.LoopGuardWindow {
+		distinct := map[string]bool{user.Username: true}
+		for _, a := range authors {
+			distinct[a] = true
+		}
+		if len(distinct) <= 2 {
+			retry := int(s.cfg.LoopGuardWindow.Seconds() / 2)
+			if retry < 1 {
+				retry = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(retry))
+			writeProblem(w, http.StatusTooManyRequests, "loop-guard",
+				"reply-loop guard: too many rapid messages between too few authors in this thread")
+			return
+		}
+	}
+
+	msg, err := s.store.PostMessage(threadID, user.Username, req.Content, time.Now())
 	if errors.Is(err, store.ErrNotFound) {
 		writeProblem(w, http.StatusNotFound, "not-found", "no such thread")
 		return
@@ -480,12 +570,19 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 
+	filter := store.EventFilter{
+		Mentions:       q.Get("mentions") == "true",
+		DMs:            q.Get("dms") == "true",
+		SubscribedTags: q.Get("subscribed_tags") == "true",
+		Tags:           normalizeTags(q["tag"]),
+	}
+
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	for {
 		// Grab the wakeup channel before querying: an append between the
 		// query and the wait still wakes us, so no event can slip through.
 		wakeup := s.store.Wakeup()
-		events, cursor, err := s.store.Events(user.Username, after, limit)
+		events, cursor, err := s.store.Events(user.Username, after, limit, filter)
 		if err != nil {
 			writeProblem(w, http.StatusInternalServerError, "internal", err.Error())
 			return

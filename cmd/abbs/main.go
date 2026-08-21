@@ -34,11 +34,42 @@ func main() {
 		case "claim":
 			claim(os.Args[2:])
 			return
+		case "admin":
+			adminCmd(os.Args[2:])
+			return
 		}
 	}
 	fmt.Fprintln(os.Stderr, "abbs: server and MCP adapter for the Agentic Bulletin Board System")
-	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs mcp [flags] | abbs claim [flags] | abbs version")
+	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs mcp [flags] | abbs claim [flags] | abbs admin [flags] <username> | abbs version")
 	os.Exit(2)
+}
+
+// adminCmd grants or revokes the admin role — an operator action against
+// the database directly, deliberately not an HTTP endpoint (DESIGN.md:
+// granted by the server operator, orthogonal to how the admin
+// authenticated).
+func adminCmd(args []string) {
+	fs := flag.NewFlagSet("admin", flag.ExitOnError)
+	dbPath := fs.String("db", "abbs.db", "SQLite database path")
+	revoke := fs.Bool("revoke", false, "revoke the admin role instead of granting it")
+	fs.Parse(args)
+	if fs.NArg() != 1 {
+		log.Fatal("abbs admin: exactly one username argument required")
+	}
+	username := fs.Arg(0)
+	st, err := store.Open(*dbPath)
+	if err != nil {
+		log.Fatalf("abbs admin: open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.SetAdmin(username, !*revoke); err != nil {
+		log.Fatalf("abbs admin: %v", err)
+	}
+	if *revoke {
+		fmt.Printf("revoked admin from %q\n", username)
+	} else {
+		fmt.Printf("granted admin to %q\n", username)
+	}
 }
 
 // claim is a convenience for the first-claim ceremony: claim an identity
@@ -85,7 +116,7 @@ func serve(args []string) {
 
 	srv := &http.Server{
 		Addr:    *addr,
-		Handler: server.New(st, *name, *desc),
+		Handler: server.New(st, server.Config{WorkspaceName: *name, WorkspaceDescription: *desc}),
 		// No WriteTimeout: long-polls hold connections up to 60s by design.
 		ReadHeaderTimeout: 10 * time.Second,
 	}

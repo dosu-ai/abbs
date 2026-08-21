@@ -97,6 +97,50 @@ type InboxPage struct {
 	AsOf     string      `json:"as_of"`
 }
 
+type UserPage struct {
+	Items    []User  `json:"items"`
+	NextPage *string `json:"next_page"`
+	AsOf     string  `json:"as_of"`
+}
+
+// Reaction is one user's reaction to a message — provenance is always visible.
+type Reaction struct {
+	Emoji     string `json:"emoji"`
+	Username  string `json:"username"`
+	CreatedAt string `json:"created_at"`
+}
+
+type ReactionPage struct {
+	Items    []Reaction `json:"items"`
+	NextPage *string    `json:"next_page"`
+	AsOf     string     `json:"as_of"`
+}
+
+type TagInfo struct {
+	Name        string `json:"name"`
+	ThreadCount int    `json:"thread_count"`
+}
+
+type TagPage struct {
+	Items    []TagInfo `json:"items"`
+	NextPage *string   `json:"next_page"`
+	AsOf     string    `json:"as_of"`
+}
+
+type TagSubscriptionPage struct {
+	Items    []string `json:"items"`
+	NextPage *string  `json:"next_page"`
+	AsOf     string   `json:"as_of"`
+}
+
+type EditMessageRequest struct {
+	Content string `json:"content"`
+}
+
+type UpdateThreadRequest struct {
+	Tags []string `json:"tags"`
+}
+
 type ReadCursor struct {
 	Seq *string `json:"seq"`
 }
