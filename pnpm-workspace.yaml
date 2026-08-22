@@ -1,0 +1,7 @@
+packages:
+  - cfworker
+  - web
+
+onlyBuiltDependencies:
+  - esbuild
+  - workerd

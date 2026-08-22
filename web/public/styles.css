@@ -1,0 +1,494 @@
+/* ABBS public directory — the docs/index.html visual language carried into
+   a real, accessible website: black background, #aaa body text, #fff active
+   text, IBM VGA with monospace fallback, text-grid rhythm, no cards, no
+   rounded UI. State color is restrained and always paired with a label. */
+
+@font-face {
+  font-family: "IBM VGA";
+  src: url("/fonts/Web437_IBM_VGA_8x16.woff") format("woff");
+  font-display: swap;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  background: #000;
+}
+
+body {
+  background: #000;
+  color: #aaa;
+  font-family: "IBM VGA", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 16px;
+  line-height: 1.25;
+  padding: 16px;
+  max-width: 1024px;
+  margin: 0 auto;
+}
+
+a {
+  color: #fff;
+}
+
+a:hover {
+  background: #fff;
+  color: #000;
+}
+
+:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+kbd {
+  border: 1px solid #444;
+  background: #111;
+  padding: 0 4px;
+  font-family: inherit;
+}
+
+hr.rule {
+  border: 0;
+  border-top: 1px dashed #444;
+  margin: 12px 0;
+}
+
+/* -- chrome ------------------------------------------------------------- */
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  background: #fff;
+  color: #000;
+  padding: 4px 8px;
+}
+
+.skip-link:focus {
+  left: 16px;
+  top: 8px;
+  z-index: 1;
+}
+
+.bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  text-transform: uppercase;
+}
+
+.bar h1 {
+  display: inline;
+  font-size: 1em;
+  font-weight: normal;
+  color: #fff;
+}
+
+.bar .bar-right {
+  color: #aaa;
+  white-space: nowrap;
+}
+
+footer .keys {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: #777;
+  text-transform: uppercase;
+}
+
+footer .colophon {
+  margin-top: 8px;
+  color: #555;
+  text-transform: uppercase;
+}
+
+#main {
+  min-height: 60vh;
+}
+
+/* -- landing art -------------------------------------------------------- */
+
+pre.art {
+  color: #fff;
+  overflow-x: auto;
+  margin-bottom: 8px;
+}
+
+.tagline {
+  margin-bottom: 12px;
+}
+
+/* -- state labels: color reinforces, text carries ----------------------- */
+
+.st {
+  text-transform: uppercase;
+}
+
+.st-online {
+  color: #33ff66;
+}
+
+.st-degraded {
+  color: #ffb000;
+}
+
+.st-unreachable {
+  color: #ff5544;
+}
+
+.st-pending {
+  color: #888;
+}
+
+/* -- filter form -------------------------------------------------------- */
+
+.filter {
+  margin: 12px 0;
+  text-transform: uppercase;
+}
+
+.filter input {
+  background: #000;
+  color: #fff;
+  border: 1px solid #444;
+  font: inherit;
+  padding: 2px 6px;
+  caret-color: #fff;
+  min-width: 12ch;
+}
+
+.filter button,
+button {
+  background: #000;
+  color: #aaa;
+  border: 1px solid #444;
+  font: inherit;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #fff;
+  color: #000;
+}
+
+button:disabled {
+  color: #666;
+  cursor: wait;
+  background: #000;
+}
+
+/* -- add-board form ------------------------------------------------------ */
+
+.add-form {
+  margin: 16px 0;
+}
+
+.add-form label {
+  text-transform: uppercase;
+}
+
+.add-form input {
+  background: #000;
+  color: #fff;
+  border: 1px solid #444;
+  font: inherit;
+  padding: 2px 6px;
+  caret-color: #fff;
+  width: min(44ch, 100%);
+}
+
+/* -- lists (directory, threads) ----------------------------------------- */
+
+table.list {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+table.list th {
+  text-align: left;
+  color: #777;
+  font-weight: normal;
+  text-transform: uppercase;
+  padding: 2px 12px 2px 0;
+  border-bottom: 1px dashed #333;
+}
+
+table.list td {
+  padding: 3px 12px 3px 0;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+table.list tbody tr:hover,
+table.list tbody tr:focus-within {
+  background: #161616;
+}
+
+table.list .num,
+table.list .dim {
+  color: #666;
+  white-space: nowrap;
+}
+
+.tag {
+  color: #999;
+}
+
+.tag::before {
+  content: "[";
+  color: #555;
+}
+
+.tag::after {
+  content: "]";
+  color: #555;
+}
+
+.tag-row {
+  margin: 8px 0;
+  text-transform: none;
+  color: #777;
+}
+
+.tag-row a {
+  color: #aaa;
+  text-decoration: none;
+}
+
+.tag-row a:hover,
+.tag-row a[aria-current="true"] {
+  color: #000;
+  background: #fff;
+}
+
+.empty {
+  color: #777;
+  margin: 16px 0;
+  text-transform: uppercase;
+}
+
+.pager {
+  margin: 12px 0;
+  text-transform: uppercase;
+}
+
+.desc {
+  margin-bottom: 4px;
+}
+
+/* -- thread reader ------------------------------------------------------ */
+
+.thread-meta {
+  color: #777;
+  margin-bottom: 12px;
+}
+
+.msg {
+  margin: 0 0 16px;
+  padding: 2px 4px;
+}
+
+.msg:target {
+  background: #101010;
+  outline: 1px solid #555;
+}
+
+.msg-head {
+  color: #777;
+}
+
+.msg-head a.msg-anchor {
+  color: #555;
+  text-decoration: none;
+}
+
+.msg-head a.msg-anchor:hover,
+.msg-head a.msg-anchor:focus-visible {
+  color: #000;
+  background: #fff;
+}
+
+.mention {
+  color: #ddd;
+}
+
+.badge {
+  color: #777;
+}
+
+.edited {
+  color: #666;
+}
+
+.msg-body {
+  margin: 4px 0 4px 16px;
+}
+
+.msg-body p {
+  margin: 6px 0;
+}
+
+.msg-body ul,
+.msg-body ol {
+  margin: 6px 0 6px 24px;
+}
+
+.msg-body blockquote {
+  border-left: 2px solid #444;
+  padding-left: 10px;
+  color: #999;
+  margin: 6px 0;
+}
+
+.msg-body code {
+  background: #131313;
+  border: 1px solid #2a2a2a;
+  padding: 0 3px;
+}
+
+.msg-body pre {
+  background: #0c0c0c;
+  border: 1px solid #2a2a2a;
+  padding: 8px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.msg-body pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.msg-tombstone .tomb {
+  color: #777;
+}
+
+.reactions {
+  margin: 2px 0 0 16px;
+  color: #999;
+}
+
+.reaction {
+  margin-right: 12px;
+}
+
+/* -- panels ------------------------------------------------------------- */
+
+.panel {
+  border: 1px solid #444;
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+
+.panel-error {
+  border-color: #ffb000;
+  color: #ffb000;
+}
+
+.panel-error a,
+.panel-error kbd {
+  color: inherit;
+}
+
+/* -- static pages ------------------------------------------------------- */
+
+h2,
+h3 {
+  font-size: 1em;
+  font-weight: normal;
+  color: #fff;
+  text-transform: uppercase;
+  margin: 16px 0 6px;
+}
+
+#main > p,
+#main > ul,
+#main > ol {
+  margin: 8px 0;
+}
+
+#main > ul,
+#main > ol {
+  margin-left: 24px;
+}
+
+#main > pre {
+  background: #0c0c0c;
+  border: 1px solid #2a2a2a;
+  padding: 8px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+/* -- utilities ----------------------------------------------------------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.cursor {
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* -- responsive: rows wrap, never horizontal scroll ---------------------- */
+
+@media (max-width: 640px) {
+  table.list thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  table.list,
+  table.list tbody,
+  table.list tr,
+  table.list td {
+    display: block;
+  }
+
+  table.list tr {
+    padding: 6px 0;
+    border-bottom: 1px dashed #222;
+  }
+
+  table.list td {
+    padding: 1px 0;
+  }
+
+  table.list .num {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor {
+    animation: none;
+  }
+
+  * {
+    transition: none !important;
+  }
+}

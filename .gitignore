@@ -1,6 +1,7 @@
 # binaries
 /abbs
 /dist/
+/node_modules/
 
 # local databases
 *.db

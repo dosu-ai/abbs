@@ -57,31 +57,32 @@ jobs:
         working-directory: cfworker
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: cfworker/package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
       - name: typecheck
-        run: npx tsc --noEmit
+        run: pnpm exec tsc --noEmit
       - name: unit tests (vitest-pool-workers, on workerd)
-        run: npx vitest run
+        run: pnpm exec vitest run
       - name: boot wrangler dev in all auth and visibility configurations
         run: |
           # Distinct inspector ports: parallel wrangler dev instances cannot
           # share the default 9229 port.
-          npx wrangler dev --port 8787 --inspector-port 9229 --persist-to "$(mktemp -d)" >/tmp/wrangler-first-claim.log 2>&1 &
+          pnpm exec wrangler dev --port 8787 --inspector-port 9229 --persist-to "$(mktemp -d)" >/tmp/wrangler-first-claim.log 2>&1 &
           ADMIN_TOKEN="abbs_ci_$(openssl rand -hex 24)"
           echo "ABBS_ADMIN_TOKEN=$ADMIN_TOKEN" >> "$GITHUB_ENV"
           printf 'ADMIN_BOOTSTRAP_TOKEN=%s\n' "$ADMIN_TOKEN" > .dev.vars.apikey
           printf 'ADMIN_BOOTSTRAP_TOKEN=%s\n' "$ADMIN_TOKEN" > .dev.vars.public-apikey
-          npx wrangler dev -e apikey --port 8788 --inspector-port 9230 --persist-to "$(mktemp -d)" >/tmp/wrangler-apikey.log 2>&1 &
-          npx wrangler dev -e public --port 8789 --inspector-port 9231 --persist-to "$(mktemp -d)" >/tmp/wrangler-public.log 2>&1 &
-          npx wrangler dev -e public-apikey --port 8790 --inspector-port 9232 --persist-to "$(mktemp -d)" >/tmp/wrangler-public-apikey.log 2>&1 &
+          pnpm exec wrangler dev -e apikey --port 8788 --inspector-port 9230 --persist-to "$(mktemp -d)" >/tmp/wrangler-apikey.log 2>&1 &
+          pnpm exec wrangler dev -e public --port 8789 --inspector-port 9231 --persist-to "$(mktemp -d)" >/tmp/wrangler-public.log 2>&1 &
+          pnpm exec wrangler dev -e public-apikey --port 8790 --inspector-port 9232 --persist-to "$(mktemp -d)" >/tmp/wrangler-public-apikey.log 2>&1 &
           for i in $(seq 120); do curl -sf http://127.0.0.1:8787/v1/server >/dev/null && break; sleep 0.5; done
           for i in $(seq 120); do curl -sf http://127.0.0.1:8788/v1/server >/dev/null && break; sleep 0.5; done
           for i in $(seq 120); do curl -sf http://127.0.0.1:8789/v1/server >/dev/null && break; sleep 0.5; done
@@ -124,6 +125,55 @@ jobs:
           echo "=== api-key ==="; cat /tmp/wrangler-apikey.log || true
           echo "=== public first-claim ==="; cat /tmp/wrangler-public.log || true
           echo "=== public api-key ==="; cat /tmp/wrangler-public-apikey.log || true
+  web:
+    runs-on: ubuntu-latest
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: typecheck (worker + browser script)
+        run: pnpm run typecheck
+      - name: unit and integration tests (vitest-pool-workers, on workerd)
+        run: pnpm exec vitest run
+      - name: boot wrangler dev with a migrated, seeded registry
+        run: |
+          # Shared default local persistence: migrations and seed land in the
+          # same .wrangler state wrangler dev reads.
+          pnpm exec wrangler d1 migrations apply abbs-directory --local
+          pnpm exec wrangler d1 execute abbs-directory --local --file seed/local.sql
+          pnpm exec wrangler dev --port 8791 --inspector-port 9239 --test-scheduled >/tmp/wrangler-web.log 2>&1 &
+          for i in $(seq 120); do curl -sf http://127.0.0.1:8791/help >/dev/null && break; sleep 0.5; done
+          # The seeded upstreams are not running here: the directory must
+          # still render, labeling them rather than failing.
+          curl -sf http://127.0.0.1:8791/ | grep -q "ABBS PUBLIC DIRECTORY"
+          curl -sf http://127.0.0.1:8791/ | grep -qi "local-go"
+          curl -sf http://127.0.0.1:8791/add | grep -q "directory_listing"
+          curl -sf http://127.0.0.1:8791/styles.css | grep -q "IBM VGA"
+          curl -sf http://127.0.0.1:8791/api/workspaces | grep -q '"slug":"local-cf"'
+          # Phase 3 registration surface: the no-JS form and the JSON API
+          # reject a non-HTTPS submission with precise, bounded errors.
+          curl -sf http://127.0.0.1:8791/add | grep -q 'form method="post" action="/add"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST --data 'url=http://plain.example.com' http://127.0.0.1:8791/add)" = "400"
+          curl -s -X POST --data 'url=http://plain.example.com' http://127.0.0.1:8791/add | grep -q "SERVED OVER HTTPS"
+          curl -s -X POST -H 'Content-Type: application/json' --data '{"url":"https://127.0.0.1"}' http://127.0.0.1:8791/api/workspaces | grep -q '"type":".*validation"'
+          # Scheduled re-verification: trigger the cron handler; the dead
+          # seed upstreams must be swept to unreachable, not delisted.
+          curl -sf "http://127.0.0.1:8791/__scheduled?cron=*+*+*+*+*" >/dev/null
+          curl -sf http://127.0.0.1:8791/api/workspaces | grep -q '"status":"unreachable"'
+          curl -sf http://127.0.0.1:8791/api/workspaces | grep -q '"last_error_code":"network"'
+      - name: wrangler logs on failure
+        if: failure()
+        run: cat /tmp/wrangler-web.log || true
   fuzz:
     runs-on: ubuntu-latest
     steps:
@@ -149,11 +199,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: redocly lint
-        run: npx --yes @redocly/cli@2 lint spec/abbs.openapi.yaml
+        run: pnpm --package=@redocly/cli@2 dlx redocly lint spec/abbs.openapi.yaml
       - uses: astral-sh/setup-uv@v5
       - name: schemathesis parses the spec
         # Full schemathesis fuzzing runs against a live server from M2 on;

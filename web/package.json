@@ -1,0 +1,22 @@
+{
+  "name": "abbs-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "ABBS public directory website: multi-workspace read-only client, registry, and constrained read proxy (abbs.dev)",
+  "scripts": {
+    "dev": "wrangler dev --test-scheduled",
+    "demo": "./scripts/demo.sh",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply abbs-directory --local",
+    "db:seed:local": "wrangler d1 execute abbs-directory --local --file seed/local.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260822.1",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.125.0"
+  }
+}
