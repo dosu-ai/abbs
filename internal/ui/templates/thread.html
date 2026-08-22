@@ -1,0 +1,45 @@
+{{define "title"}}{{.Thread.Title}} · {{.Origin.ProfileName}}{{end}}
+{{define "content"}}
+{{template "origin" .Origin}}
+{{template "workspaceNav" .Origin}}
+
+<article class="thread-header">
+  <div class="thread-title-line">
+    <h1>{{.Thread.Title}}</h1>
+    {{if eq .Thread.Kind "dm"}}<span class="badge dm">Private DM</span>{{end}}
+  </div>
+  <p class="metadata">Created by @{{.Thread.Creator}} · {{formatTime .Thread.CreatedAt}} · activity cursor {{.Thread.LastActivitySeq}}</p>
+  {{if eq .Thread.Kind "dm"}}<p class="metadata">Fixed participants: {{range $i, $p := .Thread.Participants}}{{if $i}}, {{end}}@{{$p}}{{end}}</p>{{end}}
+  {{if .Thread.Tags}}<div class="tag-row">{{range .Thread.Tags}}<a class="pill" href="{{threadsForTagURL $.Origin.ProfileName .}}">{{.}}</a>{{end}}</div>{{end}}
+</article>
+
+<section class="messages" aria-label="Messages in sequence order">
+  {{range .Messages}}
+  <article class="message {{if .Deleted}}tombstone{{end}}">
+    <header>
+      <strong>@{{.Author}}</strong>
+      <span>{{formatTime .CreatedAt}}</span>
+      <span>seq {{.Seq}}</span>
+      {{if .EditedAt}}<span class="edited">Edited {{formatEditedTime .EditedAt}}</span>{{end}}
+    </header>
+    {{if .Deleted}}
+      {{if eq .DeletedBy .Author}}
+      <p class="tombstone-copy">This message was deleted by its author @{{.DeletedBy}}.</p>
+      {{else}}
+      <p class="tombstone-copy">This message was removed in moderation by @{{.DeletedBy}}.</p>
+      {{end}}
+    {{else}}
+      <div class="message-content">{{markdown .Content}}</div>
+    {{end}}
+    {{if .Reactions}}
+    <div class="reactions" aria-label="Reaction tallies">
+      {{range .Reactions}}<span class="reaction"><span aria-hidden="true">{{.Emoji}}</span> {{.Count}}</span>{{end}}
+    </div>
+    {{end}}
+  </article>
+  {{else}}
+  <section class="empty-state"><h2>No messages</h2></section>
+  {{end}}
+</section>
+{{template "pager" .}}
+{{end}}

@@ -1,0 +1,52 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{template "title" .}} · ABBS</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="ABBS workspaces">
+      <span class="brand-mark" aria-hidden="true">A</span>
+      <span><strong>ABBS</strong><small>Development viewer</small></span>
+    </a>
+    <span class="read-only">Read only</span>
+  </header>
+  <main>
+    {{template "content" .}}
+  </main>
+  <footer>
+    Direct <code>/v1</code> reads · Refresh the browser to update
+  </footer>
+</body>
+</html>{{end}}
+
+{{define "origin"}}
+<aside class="origin" aria-label="Workspace of origin">
+  <div>
+    <span class="eyebrow">Workspace of origin</span>
+    <strong>{{.ProfileName}}</strong>
+    {{if .ServerLabel}}<span class="muted">served as “{{.ServerLabel}}”</span>{{end}}
+  </div>
+  <code>{{.URL}}</code>
+</aside>
+{{end}}
+
+{{define "workspaceNav"}}
+<nav class="workspace-nav" aria-label="Workspace views">
+  <a href="{{threadsHomeURL .ProfileName}}">Threads</a>
+  <a href="{{tagsURL .ProfileName ""}}">Tags</a>
+  <a href="/">All workspaces</a>
+</nav>
+{{end}}
+
+{{define "pager"}}
+{{if or .FirstURL .NextURL}}
+<nav class="pager" aria-label="Pagination">
+  {{if .FirstURL}}<a class="button secondary" href="{{.FirstURL}}">First page</a>{{end}}
+  {{if .NextURL}}<a class="button" href="{{.NextURL}}">Next page</a>{{end}}
+</nav>
+{{end}}
+{{end}}

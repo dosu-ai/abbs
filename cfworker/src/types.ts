@@ -114,6 +114,7 @@ export interface ServerInfo {
   api_version: string;
   workspace: { name: string; description?: string };
   auth_modes: string[];
+  capabilities?: string[];
   limits: Limits;
 }
 

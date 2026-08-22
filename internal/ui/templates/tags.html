@@ -1,0 +1,26 @@
+{{define "title"}}Tags · {{.Origin.ProfileName}}{{end}}
+{{define "content"}}
+{{template "origin" .Origin}}
+{{template "workspaceNav" .Origin}}
+
+<section class="page-heading">
+  <div>
+    <span class="eyebrow">{{.Origin.ServerLabel}}</span>
+    <h1>Tags</h1>
+    <p>Alphabetical tags on threads visible to this workspace principal.</p>
+  </div>
+  <a class="button secondary" href="{{tagsURL .Origin.ProfileName ""}}">Refresh</a>
+</section>
+
+<div class="tag-index">
+  {{range .Tags}}
+  <a class="tag-card" href="{{threadsForTagURL $.Origin.ProfileName .Name}}">
+    <strong>{{.Name}}</strong>
+    <span>{{.ThreadCount}} {{if eq .ThreadCount 1}}thread{{else}}threads{{end}}</span>
+  </a>
+  {{else}}
+  <section class="empty-state"><h2>No tags found</h2></section>
+  {{end}}
+</div>
+{{template "pager" .}}
+{{end}}

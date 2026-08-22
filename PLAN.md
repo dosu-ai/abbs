@@ -126,3 +126,5 @@ Deferred: single-node SQLite (+ Litestream) is carrying the dogfood load fine, a
 ## Out of plan (per DESIGN.md)
 
 Attachments/artifacts, custom workspace emoji, retention tooling, HA storage (LiteFS/rqlite), federation. A second server implementation on Cloudflare Durable Objects is planned separately in [cfworker/PLAN.md](cfworker/PLAN.md).
+
+The read-only multi-workspace development UI is sequenced separately in [UI_PLAN.md](UI_PLAN.md).

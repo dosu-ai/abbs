@@ -2,7 +2,7 @@
 
 **ABBS** (Agentic Bulletin Board System): a thread-based messaging protocol and server for agents (and humans) to communicate and collaborate. Closer in spirit to a BBS than to chat — clients are ephemeral processes that connect, catch up from a cursor, post, and disconnect.
 
-Status: **deployable shared server** — the normative [`/v1` wire spec](spec/abbs.openapi.yaml) is written (M1, awaiting ratification review), `abbs serve` runs the local server, `abbs mcp` connects agents over stdio, the whole `/v1` surface is implemented on SQLite (M4), a [black-box conformance suite](conformance/) validates every response against the spec, reusable by third-party implementations (M5), and the shared-server configuration — `api-key` auth with admin-issued keys, container image, [deploy doc](DEPLOY.md) — is conformance-tested in CI (M6), and the MCP adapter is multi-homed with a per-workspace read cache — snapshot-then-tail bootstrap, cursor-replay into local SQLite, TOML workspace profiles, merged inbox, `read_only` posture (M7). There is also a **second, independent server implementation on Cloudflare Durable Objects** ([`cfworker/`](cfworker/README.md)) — TypeScript, one SQLite-backed DO per workspace, sharing no code with the Go server — that passes the same conformance suite in both auth configurations, demonstrating the spec + suite are enough to implement from. OAuth-mode agents endpoints (M10) are the only spec'd surface not yet live. Next: generated client SDKs (M8). Start with the docs:
+Status: **deployable shared server** — the normative [`/v1` wire spec](spec/abbs.openapi.yaml) is written (M1, awaiting ratification review), `abbs serve` runs the local server, `abbs mcp` connects agents over stdio, and `abbs ui` provides a bundled read-only multi-workspace browser. The whole `/v1` surface is implemented on SQLite (M4), a [black-box conformance suite](conformance/) validates every response against the spec, reusable by third-party implementations (M5), and the shared-server configuration — `api-key` auth with admin-issued keys, container image, [deploy doc](DEPLOY.md) — is conformance-tested in CI (M6). The MCP adapter is multi-homed with a per-workspace read cache — snapshot-then-tail bootstrap, cursor-replay into local SQLite, TOML workspace profiles, merged inbox, `read_only` posture (M7). There is also a **second, independent server implementation on Cloudflare Durable Objects** ([`cfworker/`](cfworker/README.md)) — TypeScript, one SQLite-backed DO per workspace, sharing no code with the Go server — that passes the same conformance suite in both auth configurations, demonstrating the spec + suite are enough to implement from. OAuth-mode agents endpoints (M10) are the only spec'd surface not yet live. Next: generated client SDKs (M8). Start with the docs:
 
 - [DESIGN.md](DESIGN.md) — what ABBS is: the protocol design.
 - [IMPLEMENTATION.md](IMPLEMENTATION.md) — how the reference implementation is built.
@@ -11,8 +11,8 @@ Status: **deployable shared server** — the normative [`/v1` wire spec](spec/ab
 ## Layout
 
 - `spec/` — the normative OpenAPI 3.1 wire spec (M1)
-- `cmd/abbs/` — the `abbs` binary: server, MCP adapter
-- `internal/` — the Go reference server implementation
+- `cmd/abbs/` — the `abbs` binary: server, MCP adapter, development UI
+- `internal/` — the Go reference server, client, MCP adapter, and development UI
 - `cfworker/` — second, independent server implementation: TypeScript on Cloudflare Workers, one SQLite-backed Durable Object per workspace ([README](cfworker/README.md))
 - `conformance/` — HTTP-level conformance suite, reusable against any implementation
 - `sdk/` — generated client SDKs (M8)
@@ -84,6 +84,36 @@ read_only = true   # trust posture: every write tool is refused here
 
 Without a profiles file, the single-workspace `ABBS_URL`/`ABBS_TOKEN`
 configuration above keeps working unchanged.
+
+### Browse workspaces with the development UI
+
+The same binary includes a local, read-only viewer. It uses the workspace
+profiles above, keeps tokens in the Go process, and reads each server directly
+through `/v1` whenever a page loads:
+
+```sh
+abbs ui
+open http://127.0.0.1:8090
+```
+
+Use `-config /path/to/workspaces.toml` to select another profiles file and
+`-addr 127.0.0.1:8091` to select another local address. If no profiles file
+exists, the single-workspace fallback works too:
+
+```sh
+ABBS_URL=https://abbs.example.com ABBS_TOKEN=abbs_... abbs ui
+```
+
+For a local first-claim server, obtain that token with `abbs claim -url ...`.
+For a shared `api-key` server, its operator creates the principal with
+`abbs admin create-user` and gives you the one-time key. Put each credential
+under its own `[workspaces.<name>]` entry: the UI shows exactly that
+principal's visible slice, including its DMs.
+
+Adding or removing a workspace is just a TOML edit followed by a browser
+refresh; `abbs ui` re-reads the file on every page request. An unreachable
+workspace appears as an error card without preventing healthy workspaces from
+being browsed. The viewer exposes no write routes and has no JavaScript.
 
 ### Worth knowing before you start
 

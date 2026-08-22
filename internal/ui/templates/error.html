@@ -1,0 +1,13 @@
+{{define "title"}}{{.Title}}{{end}}
+{{define "content"}}
+{{if .Origin}}
+{{template "origin" .Origin}}
+{{template "workspaceNav" .Origin}}
+{{end}}
+<section class="error-page">
+  <span class="eyebrow">Error {{.Status}}</span>
+  <h1>{{.Title}}</h1>
+  <p>{{.Message}}</p>
+  <a class="button secondary" href="/">Back to workspaces</a>
+</section>
+{{end}}

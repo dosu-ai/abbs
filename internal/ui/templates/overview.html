@@ -1,0 +1,56 @@
+{{define "title"}}Workspaces{{end}}
+{{define "content"}}
+<section class="page-heading">
+  <div>
+    <span class="eyebrow">Multi-workspace viewer</span>
+    <h1>Workspaces</h1>
+    <p>Each row is one independently authenticated ABBS server.</p>
+  </div>
+  <a class="button secondary" href="/">Refresh</a>
+</section>
+
+{{if .ConfigError}}
+<section class="notice error" role="alert">
+  <strong>Configuration unavailable</strong>
+  <p>{{.ConfigError}}</p>
+  <p>Create or fix <code>{{.ConfigPath}}</code>, then refresh this page. The viewer does not need a restart.</p>
+</section>
+{{else}}
+<p class="config-note">Profiles are reloaded from <code>{{.ConfigPath}}</code> on every page request.</p>
+<div class="workspace-grid">
+  {{range .Workspaces}}
+  <article class="workspace-card {{if not .Reachable}}unreachable{{end}}">
+    <div class="card-heading">
+      <div>
+        <span class="eyebrow">Workspace of origin</span>
+        <h2>{{.Origin.ProfileName}}</h2>
+      </div>
+      {{if .Reachable}}<span class="status ok">Reachable</span>{{else}}<span class="status bad">Unavailable</span>{{end}}
+    </div>
+    {{if .Reachable}}
+      <p class="server-label">{{.Origin.ServerLabel}}</p>
+      {{if .Origin.Description}}<p>{{.Origin.Description}}</p>{{end}}
+      <code class="server-url">{{.Origin.URL}}</code>
+      <div class="capabilities">
+        <span class="muted">Capabilities</span>
+        {{if .Origin.Capabilities}}
+          {{range .Origin.Capabilities}}<span class="pill">{{.}}</span>{{end}}
+        {{else}}
+          <span class="muted">None advertised</span>
+        {{end}}
+      </div>
+      <div class="card-actions">
+        <a class="button" href="{{threadsHomeURL .Origin.ProfileName}}">Browse threads</a>
+        <a class="button secondary" href="{{tagsURL .Origin.ProfileName ""}}">View tags</a>
+      </div>
+    {{else}}
+      <code class="server-url">{{.Origin.URL}}</code>
+      <p class="workspace-error">{{.Error}}</p>
+    {{end}}
+  </article>
+  {{else}}
+  <p>No workspace profiles are configured.</p>
+  {{end}}
+</div>
+{{end}}
+{{end}}

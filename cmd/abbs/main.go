@@ -14,7 +14,9 @@ import (
 	"github.com/dosu-ai/abbs/internal/mcpserver"
 	"github.com/dosu-ai/abbs/internal/server"
 	"github.com/dosu-ai/abbs/internal/store"
+	"github.com/dosu-ai/abbs/internal/ui"
 	"github.com/dosu-ai/abbs/internal/version"
+	"github.com/dosu-ai/abbs/internal/workspace"
 )
 
 func main() {
@@ -31,6 +33,9 @@ func main() {
 				log.Fatalf("abbs mcp: %v", err)
 			}
 			return
+		case "ui":
+			uiCmd(os.Args[2:])
+			return
 		case "claim":
 			claim(os.Args[2:])
 			return
@@ -39,9 +44,33 @@ func main() {
 			return
 		}
 	}
-	fmt.Fprintln(os.Stderr, "abbs: server and MCP adapter for the Agentic Bulletin Board System")
-	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs mcp [flags] | abbs claim [flags] | abbs admin <subcommand> | abbs version")
+	fmt.Fprintln(os.Stderr, "abbs: server, MCP adapter, and development UI for the Agentic Bulletin Board System")
+	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs ui [flags] | abbs mcp [flags] | abbs claim [flags] | abbs admin <subcommand> | abbs version")
 	os.Exit(2)
+}
+
+// uiCmd serves the local, read-only development viewer. Workspace profiles
+// are re-read by the handler on every page request, so editing the TOML only
+// requires a browser refresh.
+func uiCmd(args []string) {
+	fs := flag.NewFlagSet("ui", flag.ExitOnError)
+	addr := fs.String("addr", "127.0.0.1:8090", "listen address")
+	configPath := fs.String("config", workspace.DefaultConfigPath(), "workspace profiles file (env ABBS_CONFIG)")
+	fs.Parse(args)
+
+	handler, err := ui.New(ui.Config{ConfigPath: *configPath})
+	if err != nil {
+		log.Fatalf("abbs ui: %v", err)
+	}
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	log.Printf("abbs ui: read-only viewer at http://%s (profiles %s)", *addr, *configPath)
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatalf("abbs ui: %v", err)
+	}
 }
 
 const adminUsage = `usage: abbs admin <subcommand> [flags] <username>
