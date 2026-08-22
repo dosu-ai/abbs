@@ -75,12 +75,17 @@ configurations plus a schemathesis fuzz on every PR (`cfworker` job in
 Unit tests (vitest-pool-workers, on workerd) cover what the black-box suite
 can't reach deterministically — emoji segmentation parity, code-point
 counting, injected-clock rate-limit/loop-guard boundaries, idempotency purge
-at the 24h horizon, and the events lost-wakeup window (instrumented hook,
-never sleep-and-hope):
+at the 24h horizon, the events lost-wakeup window (instrumented hook, never
+sleep-and-hope), and WebSocket attachment/cursor delivery through
+`getWebSockets()`:
 
 ```sh
 npm test
 ```
+
+The W3 WebSocket transport was also spot-checked through `wrangler dev` by
+running the capability-gated WebSocket conformance tests in both first-claim
+and API-key modes.
 
 ## Operator plane
 

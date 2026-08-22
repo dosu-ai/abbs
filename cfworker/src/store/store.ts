@@ -35,11 +35,16 @@ export type Row = Record<string, SqlStorageValue>;
 // blocks) — output gates then hold the HTTP response until the write is
 // durably committed, so ack ⇒ survives crash holds by construction.
 export class Store {
+  private transactionDepth = 0;
+  private notificationPending = false;
+
   constructor(
     private storage: DurableObjectStorage,
-    // notify wakes parked long-pollers; called after a committed event
-    // append (the analogue of the Go broadcast channel).
-    public notify: () => void,
+    // Wakes event transports after a committed event append (the analogue
+    // of the Go broadcast channel). Store.notify() defers this callback until
+    // the outermost transaction commits, including when a domain mutation is
+    // nested inside the idempotency transaction.
+    private onNotify: () => void,
   ) {}
 
   get sql(): SqlStorage {
@@ -47,7 +52,32 @@ export class Store {
   }
 
   tx<T>(f: () => T): T {
-    return this.storage.transactionSync(f);
+    const outermost = this.transactionDepth === 0;
+    this.transactionDepth++;
+    let committed = false;
+    try {
+      const result = this.storage.transactionSync(f);
+      committed = true;
+      return result;
+    } finally {
+      this.transactionDepth--;
+      if (outermost) {
+        const shouldNotify = committed && this.notificationPending;
+        this.notificationPending = false;
+        if (shouldNotify) this.onNotify();
+      }
+    }
+  }
+
+  // notify is called by mutations only after they append an event. Outside a
+  // transaction it delivers immediately; inside an outer idempotency
+  // transaction it is held until transactionSync has returned successfully.
+  notify(): void {
+    if (this.transactionDepth > 0) {
+      this.notificationPending = true;
+      return;
+    }
+    this.onNotify();
   }
 
   initSchema(): void {
