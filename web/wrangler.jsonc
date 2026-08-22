@@ -1,0 +1,28 @@
+// ABBS public directory website (WEBSITE_PLAN.md): a multi-homed read-only
+// client and registry, deliberately a separate service from any workspace
+// Durable Object so the website consumes the public /v1 protocol like a
+// third-party client and never grows a private store side door.
+//
+// The Worker serves the server-rendered terminal UI, the small /api surface,
+// and the constrained read proxy; D1 holds the workspace registry (URLs,
+// labels, health — never ABBS content); static assets share the origin.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "abbs-web",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "abbs-directory",
+      // Placeholder for local dev and tests; replaced by the real database
+      // id (`wrangler d1 create abbs-directory`) on first deploy.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

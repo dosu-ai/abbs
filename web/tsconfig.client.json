@@ -1,0 +1,17 @@
+// The browser enhancement script ships as plain JS (no asset build step) but
+// is still typechecked: checkJs + JSDoc annotations against DOM types.
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "allowJs": true,
+    "checkJs": true,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["public/app.js"]
+}

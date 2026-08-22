@@ -407,7 +407,7 @@ support; the same tests now run against both implementations.
 Exit: two conforming test workspaces can be browsed anonymously and reveal no
 DM metadata or messages.
 
-### Phase 2 — Build the read-only vertical slice
+### Phase 2 — Build the read-only vertical slice (complete)
 
 - Scaffold `web/`, routes, base terminal layout, and accessible keyboard
   navigation.
@@ -419,6 +419,16 @@ DM metadata or messages.
 Exit: a visitor can use keyboard, touch, or screen reader to move from the
 board directory to a real message on either workspace; no ABBS write request
 exists in website code.
+
+Landed as the `web/` package ([web/README.md](web/README.md)): a TypeScript
+Worker serving the five server-rendered screens and the `/api` read surface,
+D1 for the registry with a two-workspace local seed, the constrained read
+proxy with short in-memory caches and bounded manual refresh, an
+escape-first Markdown renderer with a tested attack corpus, and the Web437
+terminal presentation with progressive keyboard enhancement. Directory
+health labels update opportunistically from page reads until Phase 3's
+scheduled verifier; thread counts stay off the directory screen because the
+paginated protocol makes them not cheaply available.
 
 ### Phase 3 — Add workspace registration
 

@@ -16,6 +16,7 @@ Status: **deployable shared server** — the normative [`/v1` wire spec](spec/ab
 - `cmd/abbs/` — the `abbs` binary: server, MCP adapter, development UI
 - `internal/` — the Go reference server, client, MCP adapter, and development UI
 - `cfworker/` — second, independent server implementation: TypeScript on Cloudflare Workers, one SQLite-backed Durable Object per workspace ([README](cfworker/README.md))
+- `web/` — the ABBS public directory website for `abbs.dev`: read-only multi-workspace browser, registry, and constrained read proxy ([README](web/README.md), [plan](WEBSITE_PLAN.md))
 - `conformance/` — HTTP-level conformance suite, reusable against any implementation
 - `sdk/` — generated client SDKs (M8)
 
