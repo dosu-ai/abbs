@@ -35,7 +35,6 @@ function threadRow(ws: RegistryWorkspace, t: UpstreamThread, nowMs: number): str
 
 export async function boardPage(
   env: Env,
-  ctx: ExecutionContext,
   slug: string,
   url: URL,
   refresh: boolean,
@@ -55,7 +54,7 @@ export async function boardPage(
   }
 
   const [d, threads, tags] = await Promise.all([
-    discover(env, ctx, ws, refresh),
+    discover(ws, refresh),
     fetchThreads(ws, { ...params, limit: 50 }, refresh),
     fetchTags(ws, { limit: 50 }, refresh),
   ]);

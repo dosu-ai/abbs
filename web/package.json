@@ -5,7 +5,7 @@
   "type": "module",
   "description": "ABBS public directory website: multi-workspace read-only client, registry, and constrained read proxy (abbs.dev)",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --test-scheduled",
     "demo": "./scripts/demo.sh",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json",
     "test": "vitest run",

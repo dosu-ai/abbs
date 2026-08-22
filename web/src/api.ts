@@ -1,7 +1,8 @@
 // The deliberately small same-origin JSON API (WEBSITE_PLAN.md "Read proxy
-// and caching"). Read-only in Phase 2: POST /api/workspaces arrives with
-// Phase 3 registration. Upstream pagination tokens pass through as opaque
-// values and cursors are never combined across workspaces.
+// and caching"). Everything here is a read; the one mutation the directory
+// has (POST /api/workspaces) lives in register.ts. Upstream pagination
+// tokens pass through as opaque values and cursors are never combined
+// across workspaces.
 
 import { discover } from "./health";
 import { jsonResponse, problemResponse } from "./problems";
@@ -21,7 +22,7 @@ import type { PageParams, UpstreamErr } from "./upstream";
 const PAGE_CACHE = { "Cache-Control": "public, max-age=30" };
 const DIRECTORY_CACHE = { "Cache-Control": "public, max-age=30" };
 
-function workspaceJson(ws: RegistryWorkspace): Record<string, unknown> {
+export function workspaceJson(ws: RegistryWorkspace): Record<string, unknown> {
   return {
     id: ws.id,
     slug: ws.slug,
@@ -82,12 +83,11 @@ export async function apiListWorkspaces(env: Env): Promise<Response> {
 
 export async function apiGetWorkspace(
   env: Env,
-  ctx: ExecutionContext,
   slug: string,
   refresh: boolean,
 ): Promise<Response> {
   return withWorkspace(env, slug, async (ws) => {
-    const d = await discover(env, ctx, ws, refresh);
+    const d = await discover(ws, refresh);
     return jsonResponse(
       200,
       {

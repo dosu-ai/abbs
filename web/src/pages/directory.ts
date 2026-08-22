@@ -43,12 +43,7 @@ function row(l: Listed, i: number, nowMs: number): string {
 </tr>`;
 }
 
-export async function directoryPage(
-  env: Env,
-  ctx: ExecutionContext,
-  url: URL,
-  refresh: boolean,
-): Promise<Response> {
+export async function directoryPage(env: Env, url: URL, refresh: boolean): Promise<Response> {
   const q = (url.searchParams.get("q") ?? "").slice(0, 100);
   const all = await listWorkspaces(env.DB);
 
@@ -56,7 +51,7 @@ export async function directoryPage(
   // a slow or dead upstream costs one bounded fetch, not a hung directory.
   const listed: Listed[] = await Promise.all(
     all.map(async (ws) => {
-      const d = await discover(env, ctx, ws, refresh);
+      const d = await discover(ws, refresh);
       return { ws, state: d.state };
     }),
   );

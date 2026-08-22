@@ -95,6 +95,24 @@
       .catch(() => announce("COPY FAILED"));
   };
 
+  // -- add-board form ---------------------------------------------------------
+  // The form posts and redirects without JS; this only labels the wait,
+  // since verification contacts the remote workspace and can take seconds.
+
+  /** @type {HTMLFormElement | null} */
+  const addForm = document.querySelector("form[data-add-form]");
+  if (addForm !== null) {
+    addForm.addEventListener("submit", () => {
+      /** @type {HTMLButtonElement | null} */
+      const btn = addForm.querySelector("button");
+      if (btn !== null) {
+        btn.disabled = true;
+        btn.textContent = "VERIFYING…";
+      }
+      announce("VERIFYING — CONTACTING THE WORKSPACE.");
+    });
+  }
+
   // -- keys -------------------------------------------------------------------
 
   document.addEventListener("keydown", (e) => {

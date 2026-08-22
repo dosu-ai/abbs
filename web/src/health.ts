@@ -1,11 +1,11 @@
-// Live workspace health: discovery through the short cache, plus the
-// opportunistic registry write-back that keeps directory status labels
-// honest until Phase 3's scheduled verifier exists.
+// Live workspace health for the screens: discovery through the short cache,
+// mapped to the connection state a page renders. Pure reads — the registry's
+// persisted status/health columns are owned by the scheduled verification
+// sweep (verify.ts) and by registration, never by page loads.
 
-import { recordCheck } from "./registry";
 import { fetchDiscovery, isUnreachable } from "./upstream";
 import type { UpstreamResult } from "./upstream";
-import type { Env, RegistryWorkspace, UpstreamServerInfo } from "./types";
+import type { RegistryWorkspace, UpstreamServerInfo } from "./types";
 
 // The state a screen renders for a workspace's connection. Every state has a
 // text label; color is a reinforcement, never the only signal.
@@ -23,47 +23,9 @@ export function liveState(result: UpstreamResult<UpstreamServerInfo>): LiveState
   return isUnreachable(result.code) ? "unreachable" : "degraded";
 }
 
-// discover fetches /v1/server (cached 5m) and, when the observation is
-// fresh, persists it after the response via waitUntil. The discovery cache
-// bounds the write rate; the read path never blocks on D1 writes.
-export async function discover(
-  env: Env,
-  ctx: ExecutionContext,
-  ws: RegistryWorkspace,
-  refresh = false,
-): Promise<Discovery> {
+// discover fetches /v1/server (cached 5m) for a screen's status label.
+export async function discover(ws: RegistryWorkspace, refresh = false): Promise<Discovery> {
   const result = await fetchDiscovery(ws, refresh);
-  if (result.fresh) {
-    const now = new Date().toISOString();
-    if (result.ok) {
-      const w = result.value.workspace;
-      if (w.visibility === "public") {
-        ctx.waitUntil(
-          recordCheck(env.DB, ws.id, now, {
-            ok: true,
-            name: w.name,
-            description: w.description ?? "",
-            apiVersion: result.value.api_version,
-            canonicalUrl: w.canonical_url ?? null,
-          }),
-        );
-      } else {
-        // Reachable and conformant but no longer public: the listing decays
-        // to degraded; Phase 3's verifier owns actual delisting.
-        ctx.waitUntil(
-          recordCheck(env.DB, ws.id, now, { ok: false, errorCode: "not-public" }),
-        );
-      }
-    } else {
-      ctx.waitUntil(
-        recordCheck(env.DB, ws.id, now, {
-          ok: false,
-          errorCode: result.code,
-          unreachable: isUnreachable(result.code),
-        }),
-      );
-    }
-  }
   return { result, state: liveState(result) };
 }
 

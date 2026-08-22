@@ -63,6 +63,92 @@ export async function getWorkspace(
   return r === null ? null : fromRow(r);
 }
 
+// findByBaseUrl looks a row up by normalized base URL *including delisted
+// rows* — registration must see a delisted row to refuse resurrecting it.
+export async function findByBaseUrl(
+  db: D1Database,
+  baseUrl: string,
+): Promise<RegistryWorkspace | null> {
+  const r = await db
+    .prepare(`SELECT ${COLUMNS} FROM workspaces WHERE base_url = ?`)
+    .bind(baseUrl)
+    .first<Row>();
+  return r === null ? null : fromRow(r);
+}
+
+// listForVerification feeds the scheduled sweep: every row except delisted
+// ones, which are never contacted again.
+export async function listForVerification(db: D1Database): Promise<RegistryWorkspace[]> {
+  const rs = await db
+    .prepare(`SELECT ${COLUMNS} FROM workspaces WHERE status != 'delisted' ORDER BY slug ASC`)
+    .all<Row>();
+  return rs.results.map(fromRow);
+}
+
+// Slugs stay reserved even after delisting, so a removed workspace's URLs
+// never start pointing at a different board.
+export async function slugTaken(db: D1Database, slug: string): Promise<boolean> {
+  const r = await db
+    .prepare("SELECT 1 AS one FROM workspaces WHERE slug = ?")
+    .bind(slug)
+    .first<{ one: number }>();
+  return r !== null;
+}
+
+export interface NewWorkspace {
+  id: string;
+  slug: string;
+  baseUrl: string;
+  canonicalUrl: string;
+  name: string;
+  description: string;
+  apiVersion: string;
+  now: string;
+}
+
+// insertActive inserts a freshly verified workspace. Unique-constraint
+// races (base_url or slug) throw; the caller re-checks by base URL.
+export async function insertActive(db: D1Database, ws: NewWorkspace): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO workspaces
+         (id, slug, base_url, canonical_url, name, description, api_version,
+          status, submitted_at, last_checked_at, last_success_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+    )
+    .bind(
+      ws.id,
+      ws.slug,
+      ws.baseUrl,
+      ws.canonicalUrl,
+      ws.name,
+      ws.description,
+      ws.apiVersion,
+      ws.now,
+      ws.now,
+      ws.now,
+    )
+    .run();
+}
+
+// markDelisted takes a listing out of the directory (lost consent, or the
+// operator statements documented in the README). The guard keeps the first
+// delist reason intact if it races with itself.
+export async function markDelisted(
+  db: D1Database,
+  id: string,
+  now: string,
+  code: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE workspaces SET status = 'delisted', last_checked_at = ?, last_error_code = ?
+       WHERE id = ? AND status != 'delisted'`,
+    )
+    .bind(now, code, id)
+    .run();
+}
+
 export interface CheckOutcome {
   ok: boolean;
   // Present on success: values re-verified from the authoritative /v1/server.
@@ -77,10 +163,9 @@ export interface CheckOutcome {
   unreachable?: boolean;
 }
 
-// recordCheck persists an opportunistic health observation made while
-// serving a page. Scheduled verification (and delisting on lost consent)
-// arrives in Phase 3; until then reads keep the health columns honest.
-// Guarded so a delisted workspace is never resurrected.
+// recordCheck persists a scheduled-sweep observation (verify.ts). Guarded
+// so a delisted workspace is never resurrected: delisting is reversed only
+// by the operator relist statement documented in the README.
 export async function recordCheck(
   db: D1Database,
   id: string,

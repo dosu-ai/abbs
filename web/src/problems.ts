@@ -12,6 +12,9 @@ const problemTitles: Record<string, string> = {
   "upstream-unreachable": "Workspace unreachable",
   "upstream-degraded": "Workspace responded unexpectedly",
   "upstream-rate-limited": "Workspace rate limited the directory",
+  "registration-failed": "Workspace verification failed",
+  delisted: "Workspace delisted",
+  "rate-limited": "Too many submissions",
   internal: "Internal error",
 };
 

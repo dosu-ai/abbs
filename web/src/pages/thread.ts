@@ -79,7 +79,6 @@ ${renderMarkdown(m.content ?? "")}
 
 export async function threadPage(
   env: Env,
-  ctx: ExecutionContext,
   slug: string,
   threadId: string,
   url: URL,
@@ -92,7 +91,7 @@ export async function threadPage(
   if (params === null) return problemResponse(400, "validation", "invalid page parameter");
 
   const [d, thread, messages] = await Promise.all([
-    discover(env, ctx, ws, refresh),
+    discover(ws, refresh),
     fetchThread(ws, threadId, refresh),
     fetchMessages(ws, threadId, { ...params, limit: 50 }, refresh),
   ]);

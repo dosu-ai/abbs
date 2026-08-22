@@ -15,6 +15,12 @@
     "directory": "./public",
     "binding": "ASSETS"
   },
+  // Scheduled re-verification of every listed workspace: refreshes cached
+  // metadata, degrades/unreaches on failures, delists on lost
+  // directory_listing consent (src/verify.ts).
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
   "d1_databases": [
     {
       "binding": "DB",

@@ -430,7 +430,7 @@ health labels update opportunistically from page reads until Phase 3's
 scheduled verifier; thread counts stay off the directory screen because the
 paginated protocol makes them not cheaply available.
 
-### Phase 3 — Add workspace registration
+### Phase 3 — Add workspace registration (complete)
 
 - Add registry migration and idempotent `POST /api/workspaces`.
 - Implement URL normalization, discovery verification, anonymous read probes,
@@ -440,6 +440,24 @@ paginated protocol makes them not cheaply available.
 Exit: a conforming public server can be submitted once, appears immediately,
 survives redeploys, and is automatically marked unhealthy or delisted when
 its public contract changes.
+
+Landed as `web/src/register.ts` + `web/src/verify.ts`
+([web/README.md](web/README.md) "Registration"): the `/add` screen is a real
+form (plain POST + 303, JavaScript only labels the wait) sharing one
+idempotent flow with `POST /api/workspaces` — HTTPS-origin normalization
+(credentials, query, fragment, non-root paths, ports, IP literals, and
+single-label/special-use hostnames rejected with precise errors), live
+verification through the constrained read proxy (schema, `v1`, public
+visibility, canonical-origin match, `directory_listing` consent, non-empty
+description, anonymous thread- and message-list probes), and per-address
+rate limits with bounded error copy. A 15-minute cron sweep replaces the
+Phase 2 opportunistic health write-back: it refreshes cached metadata,
+degrades or unreaches on failure, delists on lost consent, and never
+contacts or resurrects delisted rows; operator delist/relist are documented
+D1 statements. In-Worker SSRF control is name-layer validation plus the
+proxy's no-redirect/time/size caps; resolved-IP checks are delegated to
+Cloudflare's egress because workerd exposes no DNS resolver — the
+enforceable/delegated split is documented in the README.
 
 ### Phase 4 — Polish and launch
 

@@ -149,7 +149,7 @@ jobs:
           # same .wrangler state wrangler dev reads.
           npx wrangler d1 migrations apply abbs-directory --local
           npx wrangler d1 execute abbs-directory --local --file seed/local.sql
-          npx wrangler dev --port 8791 --inspector-port 9239 >/tmp/wrangler-web.log 2>&1 &
+          npx wrangler dev --port 8791 --inspector-port 9239 --test-scheduled >/tmp/wrangler-web.log 2>&1 &
           for i in $(seq 120); do curl -sf http://127.0.0.1:8791/help >/dev/null && break; sleep 0.5; done
           # The seeded upstreams are not running here: the directory must
           # still render, labeling them rather than failing.
@@ -158,6 +158,17 @@ jobs:
           curl -sf http://127.0.0.1:8791/add | grep -q "directory_listing"
           curl -sf http://127.0.0.1:8791/styles.css | grep -q "IBM VGA"
           curl -sf http://127.0.0.1:8791/api/workspaces | grep -q '"slug":"local-cf"'
+          # Phase 3 registration surface: the no-JS form and the JSON API
+          # reject a non-HTTPS submission with precise, bounded errors.
+          curl -sf http://127.0.0.1:8791/add | grep -q 'form method="post" action="/add"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST --data 'url=http://plain.example.com' http://127.0.0.1:8791/add)" = "400"
+          curl -s -X POST --data 'url=http://plain.example.com' http://127.0.0.1:8791/add | grep -q "SERVED OVER HTTPS"
+          curl -s -X POST -H 'Content-Type: application/json' --data '{"url":"https://127.0.0.1"}' http://127.0.0.1:8791/api/workspaces | grep -q '"type":".*validation"'
+          # Scheduled re-verification: trigger the cron handler; the dead
+          # seed upstreams must be swept to unreachable, not delisted.
+          curl -sf "http://127.0.0.1:8791/__scheduled?cron=*+*+*+*+*" >/dev/null
+          curl -sf http://127.0.0.1:8791/api/workspaces | grep -q '"status":"unreachable"'
+          curl -sf http://127.0.0.1:8791/api/workspaces | grep -q '"last_error_code":"network"'
       - name: wrangler logs on failure
         if: failure()
         run: cat /tmp/wrangler-web.log || true

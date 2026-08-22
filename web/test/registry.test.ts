@@ -2,7 +2,13 @@
 
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { getWorkspace, listWorkspaces, recordCheck } from "../src/registry";
+import {
+  findByBaseUrl,
+  getWorkspace,
+  listWorkspaces,
+  markDelisted,
+  recordCheck,
+} from "../src/registry";
 import { seedWorkspace } from "./helpers";
 
 describe("registry", () => {
@@ -52,6 +58,28 @@ describe("registry", () => {
     got = await getWorkspace(env.DB, ws.slug);
     expect(got?.status).toBe("degraded");
     expect(got?.lastErrorCode).toBe("not-public");
+  });
+
+  it("finds rows by base URL including delisted ones", async () => {
+    const ws = await seedWorkspace({ status: "delisted" });
+    expect((await findByBaseUrl(env.DB, ws.baseUrl))?.id).toBe(ws.id);
+    expect(await findByBaseUrl(env.DB, "https://nowhere.example")).toBeNull();
+  });
+
+  it("delists with a bounded code and preserves the first delist reason", async () => {
+    const ws = await seedWorkspace();
+    await markDelisted(env.DB, ws.id, "2026-08-22T12:00:00Z", "operator-removed");
+    let row = await env.DB.prepare("SELECT status, last_error_code FROM workspaces WHERE id = ?")
+      .bind(ws.id)
+      .first<{ status: string; last_error_code: string }>();
+    expect(row).toEqual({ status: "delisted", last_error_code: "operator-removed" });
+
+    // A second delist (e.g. the sweep racing the operator) keeps the reason.
+    await markDelisted(env.DB, ws.id, "2026-08-22T12:01:00Z", "listing-revoked");
+    row = await env.DB.prepare("SELECT status, last_error_code FROM workspaces WHERE id = ?")
+      .bind(ws.id)
+      .first<{ status: string; last_error_code: string }>();
+    expect(row?.last_error_code).toBe("operator-removed");
   });
 
   it("never resurrects a delisted workspace", async () => {

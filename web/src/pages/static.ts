@@ -1,13 +1,34 @@
-// The static screens: /add (workspace submission requirements — the actual
-// form arrives with Phase 3 registration) and /help (keyboard vocabulary,
-// accessibility notes, and the public-read contract).
+// The static screens: /add (the workspace submission form — the directory's
+// one public mutation) and /help (keyboard vocabulary, accessibility notes,
+// and the public-read contract).
 
+import { attr, esc } from "../html";
 import { page } from "../layout";
 
-export function addPage(): Response {
+// Form state for re-rendering after a failed POST /add: a precise, bounded
+// error (never upstream content) and the submitted value preserved.
+export interface AddFormState {
+  error?: string;
+  value?: string;
+  status?: number;
+}
+
+export function addPage(state: AddFormState = {}): Response {
+  const errorPanel =
+    state.error !== undefined
+      ? `<section class="panel panel-error" role="alert"><p>${esc(state.error)}</p></section>\n`
+      : "";
   const main = `<h2>ADD YOUR BOARD</h2>
 <p>THE DIRECTORY LISTS INDEPENDENT ABBS WORKSPACE SERVERS THAT OPT IN TO
-PUBLIC READING. SUBMISSIONS OPEN SOON; THE REQUIREMENTS BELOW ALREADY APPLY.</p>
+PUBLIC READING. SUBMIT AN HTTPS BASE URL; VERIFICATION RUNS IMMEDIATELY AND
+A CONFORMING BOARD IS LISTED AT ONCE — THERE IS NO REVIEW QUEUE.</p>
+
+${errorPanel}<form method="post" action="/add" class="add-form" data-add-form>
+  <label for="url">WORKSPACE URL:</label>
+  <input id="url" name="url" value="${attr(state.value ?? "")}" placeholder="https://bbs.example.com"
+    maxlength="512" autocomplete="url" spellcheck="false" autocapitalize="none" required>
+  <button>SUBMIT FOR VERIFICATION</button>
+</form>
 
 <h3>A LISTABLE WORKSPACE</h3>
 <ul>
@@ -33,8 +54,9 @@ PUBLIC READING. SUBMISSIONS OPEN SOON; THE REQUIREMENTS BELOW ALREADY APPLY.</p>
 }</code></pre>
 
 <p>ENABLING PUBLIC VISIBILITY PUBLISHES THE COMPLETE EXISTING HISTORY OF
-EVERY PUBLIC THREAD. DMS STAY PRIVATE. TURNING LISTING OFF DELISTS THE
-WORKSPACE WITHOUT CHANGING ITS OWN PUBLIC-READ BEHAVIOR.</p>
+EVERY PUBLIC THREAD. DMS STAY PRIVATE. THE DIRECTORY RE-VERIFIES EVERY
+LISTED BOARD ON A SCHEDULE: TURNING <code>directory_listing</code> OFF
+DELISTS THE WORKSPACE WITHOUT CHANGING ITS OWN PUBLIC-READ BEHAVIOR.</p>
 
 <p>THE DIRECTORY STORES URLS, LABELS, AND HEALTH ONLY — NEVER CREDENTIALS OR
 MESSAGE CONTENT. EACH LISTED SERVER REMAINS AUTHORITATIVE FOR ITS WORKSPACE.</p>`;
@@ -49,6 +71,7 @@ MESSAGE CONTENT. EACH LISTED SERVER REMAINS AUTHORITATIVE FOR ITS WORKSPACE.</p>
       { keys: ["B"], label: "BOARDS" },
       { keys: ["?"], label: "HELP" },
     ],
+    status: state.status,
   });
 }
 
@@ -87,7 +110,8 @@ INPUT.</p>
 <ul>
   <li>LIST REGISTERED PUBLIC WORKSPACES AND FILTER THEM;</li>
   <li>BROWSE A WORKSPACE'S PUBLIC THREADS AND TAGS;</li>
-  <li>READ EVERY MESSAGE IN A PUBLIC THREAD, INCLUDING EDIT AND DELETE STATE.</li>
+  <li>READ EVERY MESSAGE IN A PUBLIC THREAD, INCLUDING EDIT AND DELETE STATE;</li>
+  <li>SUBMIT ANOTHER CONFORMING PUBLIC WORKSPACE ON <a href="/add">/ADD</a>.</li>
 </ul>
 <p>VISITORS CANNOT POST, REPLY, REACT, EDIT, DELETE, SUBSCRIBE, OR SEE DMS
 AND INBOXES. DMS ARE NEVER READABLE ANONYMOUSLY — A DM RETURNS 404 SO ITS

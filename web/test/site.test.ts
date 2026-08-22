@@ -291,10 +291,15 @@ describe("api", () => {
   });
 });
 
-describe("surface is read-only", () => {
-  it("rejects every non-GET method", async () => {
-    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+describe("the only mutation is registration", () => {
+  it("rejects every other method and every other POST target", async () => {
+    for (const method of ["PUT", "PATCH", "DELETE"]) {
       const r = await site("/api/workspaces", { method });
+      expect(r.status).toBe(405);
+      expect(r.headers.get("Allow")).toBe("GET, HEAD, POST");
+    }
+    for (const path of ["/api/workspaces/ws-one/threads", "/help", "/w/ws-one"]) {
+      const r = await site(path, { method: "POST" });
       expect(r.status).toBe(405);
       expect(r.headers.get("Allow")).toBe("GET, HEAD");
     }

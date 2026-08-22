@@ -179,6 +179,32 @@ button:hover {
   color: #000;
 }
 
+button:disabled {
+  color: #666;
+  cursor: wait;
+  background: #000;
+}
+
+/* -- add-board form ------------------------------------------------------ */
+
+.add-form {
+  margin: 16px 0;
+}
+
+.add-form label {
+  text-transform: uppercase;
+}
+
+.add-form input {
+  background: #000;
+  color: #fff;
+  border: 1px solid #444;
+  font: inherit;
+  padding: 2px 6px;
+  caret-color: #fff;
+  width: min(44ch, 100%);
+}
+
 /* -- lists (directory, threads) ----------------------------------------- */
 
 table.list {
