@@ -14,10 +14,12 @@ import { bearerToken, mintToken, sha256Hex } from "./auth";
 import { RateLimiter } from "./ratelimit";
 import { DEFAULT_LOOP_GUARD } from "./loopguard";
 import { Router } from "./router";
-import { Store } from "./store/store";
+import { Store, events, type EventFilter } from "./store/store";
+import { userByTokenHash } from "./store/users";
+import { parseSeq } from "./text";
 import { writeWrapped } from "./middleware";
 import { handleAdmin, seedBootstrapAdmin } from "./admin";
-import { runHandler } from "./handlers/helpers";
+import { authenticate, runHandler } from "./handlers/helpers";
 import { handleGetServer } from "./handlers/server";
 import { handleClaimUser, handleDeactivateUser, handleGetUser, handleListUsers } from "./handlers/users";
 import { handleCreateThread, handleGetThread, handleListThreads } from "./handlers/threads";
@@ -37,10 +39,21 @@ import {
   handleUpdateThreadTags,
 } from "./handlers/tags";
 import { handleGetReadCursor, handleInbox, handleSetReadCursor } from "./handlers/inbox";
-import { handleEvents } from "./handlers/events";
+import { handleEvents, parseEventQuery } from "./handlers/events";
 
 const MAX_BODY_BYTES = 1 << 20; // the Go server's http.MaxBytesReader cap
 const MAX_WAITERS = 256; // parked long-poll cap; unreachable in conformance
+const MAX_WEBSOCKETS = 256; // per-workspace hibernatable socket cap
+const MAX_WEBSOCKET_ATTACHMENT_BYTES = 2 << 10;
+const ATTACHMENT_TOO_LARGE_DETAIL =
+  "tag filter too large for the websocket transport on this server; narrow the tag filter or use GET /v1/events";
+
+interface WebSocketAttachment {
+  user: string;
+  tokenHash: string;
+  cursor: number;
+  filter: EventFilter;
+}
 
 interface DrainedBody {
   text: string; // "" when there was no body or it was oversize
@@ -89,7 +102,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.store = new Store(ctx.storage, () => this.notifyWaiters());
+    this.store = new Store(ctx.storage, () => this.notifyEventTransports());
 
     // Only the exact mode strings are accepted; anything else fails init
     // rather than silently falling back to first-claim — a typo'd production
@@ -110,6 +123,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         ...(description !== "" ? { description } : {}),
       },
       auth_modes: [authMode],
+      capabilities: ["websocket"],
       limits: this.limits,
     };
 
@@ -141,6 +155,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     r.add("DELETE /v1/tag-subscriptions/{tag}", true, handleUnsubscribeTag);
     r.add("GET /v1/inbox", false, handleInbox);
     r.add("GET /v1/events", false, handleEvents);
+    r.add("GET /v1/events/ws", false, (c) => this.handleEventsWebSocket(c));
 
     ctx.blockConcurrencyWhile(async () => {
       this.store.initSchema();
@@ -156,6 +171,103 @@ export class WorkspaceDO extends DurableObject<Env> {
     const resolvers = [...this.waiters];
     this.waiters.clear();
     for (const resolve of resolvers) resolve();
+  }
+
+  private notifyEventTransports(): void {
+    this.notifyWaiters();
+    this.deliverWebSocketEvents();
+  }
+
+  private handleEventsWebSocket(c: ReqCtx): Response {
+    const user = authenticate(c);
+    const query = parseEventQuery(c);
+    if (!headerContainsToken(c.request.headers, "Upgrade", "websocket")) {
+      throw new ProblemError(400, "validation", "missing Upgrade: websocket header");
+    }
+    if (this.ctx.getWebSockets().length >= MAX_WEBSOCKETS) {
+      return problemResponse(503, "internal", "too many websocket connections");
+    }
+
+    // Keep the attachment within the transport's deliberately conservative
+    // 2 KiB budget. Use the largest possible cursor in the preflight so a
+    // later cursor advance cannot push an accepted socket over the limit.
+    const attachment: WebSocketAttachment = {
+      user: user.username,
+      tokenHash: c.tokenHash!, // authenticate proved the bearer hash is present
+      cursor: query.after,
+      filter: query.filter,
+    };
+    const sizedAttachment = { ...attachment, cursor: Number.MAX_SAFE_INTEGER };
+    if (serializedSize(sizedAttachment) > MAX_WEBSOCKET_ATTACHMENT_BYTES) {
+      throw new ProblemError(400, "validation", ATTACHMENT_TOO_LARGE_DETAIL);
+    }
+
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    this.ctx.acceptWebSocket(server);
+
+    // Everything from acceptance through catch-up and attachment persistence
+    // is synchronous. No append can interleave between the query and socket
+    // registration in this Durable Object.
+    try {
+      const advanced = this.sendPendingEvents(server, attachment);
+      server.serializeAttachment(advanced);
+    } catch {
+      closeWebSocket(server, 1011, "event delivery failed");
+    }
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  private deliverWebSocketEvents(): void {
+    let sockets: WebSocket[];
+    try {
+      sockets = this.ctx.getWebSockets();
+    } catch {
+      return;
+    }
+    for (const socket of sockets) {
+      try {
+        const attachment = deserializeWebSocketAttachment(socket);
+        const principal = userByTokenHash(this.store, attachment.tokenHash);
+        if (principal === null || principal.username !== attachment.user || principal.deactivated) {
+          closeWebSocket(socket, 1008, "credentials revoked or user deactivated");
+          continue;
+        }
+        const advanced = this.sendPendingEvents(socket, attachment);
+        socket.serializeAttachment(advanced);
+      } catch {
+        closeWebSocket(socket, 1011, "event delivery failed");
+      }
+    }
+  }
+
+  private sendPendingEvents(socket: WebSocket, attachment: WebSocketAttachment): WebSocketAttachment {
+    let cursor = attachment.cursor;
+    for (;;) {
+      const batch = events(this.store, attachment.user, cursor, this.limits.events_max_batch, attachment.filter);
+      for (const event of batch.events) socket.send(JSON.stringify(event));
+      if (batch.events.length === 0) break;
+
+      const advanced = parseSeq(batch.cursor);
+      if (advanced === null || advanced <= cursor) throw new Error("invalid event cursor");
+      cursor = advanced;
+      if (batch.events.length < this.limits.events_max_batch) break;
+    }
+    return { ...attachment, cursor };
+  }
+
+  // ABBS currently defines no client-to-server application frames. Ignore
+  // them so the protocol retains additive headroom without waking any
+  // application-level response path.
+  webSocketMessage(_socket: WebSocket, _message: string | ArrayBuffer): void {}
+
+  // This compatibility date predates automatic close replies, so complete a
+  // client-initiated close handshake explicitly. Reserved synthetic codes
+  // (notably 1006 for an abrupt disconnect) cannot appear in a close frame.
+  webSocketClose(socket: WebSocket, code: number, reason: string, _wasClean: boolean): void {
+    if (code === 1005 || code === 1006 || code === 1015) return;
+    closeWebSocket(socket, code, reason);
   }
 
   private waitForEvent(): Waiter {
@@ -261,5 +373,46 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (err instanceof ProblemError) return err.response();
       return problemResponse(500, "internal", err instanceof Error ? err.message : String(err));
     }
+  }
+}
+
+function headerContainsToken(headers: Headers, name: string, token: string): boolean {
+  const value = headers.get(name);
+  if (value === null) return false;
+  return value.split(",").some((part) => part.trim().toLowerCase() === token.toLowerCase());
+}
+
+function serializedSize(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function deserializeWebSocketAttachment(socket: WebSocket): WebSocketAttachment {
+  const value = socket.deserializeAttachment() as Partial<WebSocketAttachment> | null;
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    typeof value.user !== "string" ||
+    typeof value.tokenHash !== "string" ||
+    typeof value.cursor !== "number" ||
+    !Number.isSafeInteger(value.cursor) ||
+    value.cursor < 0 ||
+    value.filter === undefined ||
+    typeof value.filter !== "object" ||
+    typeof value.filter.mentions !== "boolean" ||
+    typeof value.filter.dms !== "boolean" ||
+    typeof value.filter.subscribedTags !== "boolean" ||
+    !Array.isArray(value.filter.tags) ||
+    value.filter.tags.some((tag) => typeof tag !== "string")
+  ) {
+    throw new Error("invalid websocket attachment");
+  }
+  return value as WebSocketAttachment;
+}
+
+function closeWebSocket(socket: WebSocket, code: number, reason: string): void {
+  try {
+    socket.close(code, reason);
+  } catch {
+    // A peer can disappear between getWebSockets() and close().
   }
 }

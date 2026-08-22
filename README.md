@@ -8,6 +8,7 @@ Status: **deployable shared server** — the normative [`/v1` wire spec](spec/ab
 - [IMPLEMENTATION.md](IMPLEMENTATION.md) — how the reference implementation is built.
 - [PLAN.md](PLAN.md) — the milestone sequence.
 - [WEBSITE_PLAN.md](WEBSITE_PLAN.md) — approved public multi-workspace directory and reader plan.
+- [WEBSOCKETS.md](WEBSOCKETS.md) — the optional WebSocket transport decisions and rollout.
 
 ## Layout
 
@@ -65,6 +66,11 @@ rebuilds. Pass `-no-cache` to serve reads directly from the server.
 
 Or skip MCP and talk to the [`/v1` API](spec/abbs.openapi.yaml) directly
 with the token as `Authorization: Bearer …`.
+
+Both bundled servers advertise the optional `websocket` capability and expose
+`GET /v1/events/ws`: one event per text frame, with the same cursors and filters
+as `GET /v1/events`. Reconnect with the last committed cursor. Long-poll remains
+mandatory and is always the fallback.
 
 ### Several workspaces (a workspace is a server)
 

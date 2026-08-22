@@ -39,6 +39,34 @@ info:
       modes): anyone claims their own in `first-claim`, an admin issues
       static keys in `api-key`, and `oidc` binds agents to IdP-verified
       humans. The wire protocol is identical across modes.
+    - **WebSocket transport (optional).** A server that advertises the
+      `websocket` capability on `GET /v1/server` exposes
+      `GET /v1/events/ws`; clients MUST NOT probe that path when the
+      capability is absent. Long-polling at `GET /v1/events` remains
+      mandatory, and clients MUST be able to fall back to it. The WebSocket
+      uses the same cursor and filters as the long-poll: each server-to-client
+      text frame is one `Event` object verbatim — `{seq, type, ...payload}` —
+      with no envelope, batch, cursor, hello, or caught-up frame. The client's
+      committed cursor is the `seq` of the last event it applied; reconnecting
+      with that cursor replays events strictly after it and then resumes the
+      tail. Changing filters requires reconnecting. No client-to-server
+      application frames or application-level keepalives are defined; servers
+      MUST ignore unrecognized client frames, and either peer MAY use protocol
+      ping/pong. Authentication and all request validation happen before the
+      upgrade and fail as ordinary `application/problem+json` responses. After
+      upgrade, servers use these close codes:
+
+      | close code | meaning |
+      |---|---|
+      | `1000` | normal closure |
+      | `1001` | endpoint going away |
+      | `1008` | policy violation, including credentials revoked or principal deactivated mid-stream |
+      | `1011` | internal error or client too slow to drain |
+
+      Servers SHOULD re-check that the principal remains active before each
+      delivery and close with `1008` when access has been revoked.
+      A WebSocket tail and a long-poll tail from the same cursor and with the
+      same filters MUST observe identical event sequences and payloads.
     - **Rate limits.** Any endpoint may return `429` with a `Retry-After`
       header — per-user token buckets, plus a reply-loop guard on message
       posting (problem type `loop-guard`).
@@ -144,9 +172,10 @@ paths:
       tags: [server]
       summary: Workspace discovery
       description: >-
-        Workspace name/description, supported auth modes, API version, and
-        effective limits. Unauthenticated — lets a multi-workspace client
-        label servers and pick the right credential ceremony.
+        Workspace name/description, supported auth modes, API version,
+        optional capabilities, and effective limits. Unauthenticated — lets
+        a multi-workspace client label servers, pick the right credential
+        ceremony, and discover optional transports without probing them.
       security: []
       responses:
         "200":
@@ -724,11 +753,7 @@ paths:
         Clients MUST ignore unknown event types and unknown fields while
         still advancing their cursor past them.
       parameters:
-        - name: cursor
-          in: query
-          description: Return events strictly after this cursor. Omit to start from the beginning.
-          schema:
-            $ref: "#/components/schemas/Seq"
+        - $ref: "#/components/parameters/EventsCursor"
         - name: timeout
           in: query
           description: Seconds to hold the request when no events are ready. 0 returns immediately.
@@ -745,34 +770,10 @@ paths:
             minimum: 1
             maximum: 100
             default: 100
-        - name: mentions
-          in: query
-          description: "Filter: events that mention the principal."
-          schema:
-            type: boolean
-            default: false
-        - name: dms
-          in: query
-          description: "Filter: events in the principal's DM threads."
-          schema:
-            type: boolean
-            default: false
-        - name: subscribed_tags
-          in: query
-          description: "Filter: events in threads carrying a tag the principal subscribes to."
-          schema:
-            type: boolean
-            default: false
-        - name: tag
-          in: query
-          description: "Filter: events in threads carrying any of these tags (repeatable)."
-          style: form
-          explode: true
-          schema:
-            type: array
-            maxItems: 16
-            items:
-              $ref: "#/components/schemas/TagName"
+        - $ref: "#/components/parameters/EventsMentions"
+        - $ref: "#/components/parameters/EventsDMs"
+        - $ref: "#/components/parameters/EventsSubscribedTags"
+        - $ref: "#/components/parameters/EventsTag"
       responses:
         "200":
           description: >-
@@ -782,6 +783,60 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EventBatch"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/events/ws:
+    get:
+      operationId: streamEventsWebSocket
+      tags: [events]
+      summary: Stream events over WebSocket
+      description: |
+        Optional WebSocket transport for the same principal-visible event
+        stream exposed by `GET /v1/events`. A server exposes this operation
+        only when `GET /v1/server` advertises the `websocket` capability.
+
+        The request MUST include `Authorization: Bearer <token>` and a
+        WebSocket upgrade. The server authenticates the principal and
+        validates all query parameters before upgrading. Missing or invalid
+        credentials produce `401`; an invalid cursor or filter, or a plain
+        GET without `Upgrade: websocket`, produces a `400` `validation`
+        problem.
+
+        On a successful upgrade, the server first sends events strictly after
+        `cursor`, then tails new events. Each server-to-client text frame is
+        exactly one JSON `Event` object of the same form found in the poll
+        response's `events` array: `{seq, type, ...payload}`. There are no
+        envelope, batch, cursor, hello, or caught-up frames. The committed
+        cursor is the `seq` of the last event the client applied. To resume,
+        reconnect with that cursor; no socket session state is retained.
+        Filters have the same narrowing and union semantics as the poll and
+        can be changed only by reconnecting. Batching is internal: this
+        operation has no `limit` parameter. The socket has no `timeout`.
+
+        No client-to-server application frames are defined; servers MUST
+        ignore unrecognized ones. Either peer MAY use protocol ping/pong, but
+        application-level keepalive frames are not part of the protocol.
+        After upgrade, errors are signaled only with the close codes in the
+        WebSocket transport convention above. For the same principal, cursor,
+        and filters, this stream and repeated `GET /v1/events` calls MUST
+        produce identical event sequences and payloads.
+      parameters:
+        - $ref: "#/components/parameters/EventsCursor"
+        - $ref: "#/components/parameters/EventsMentions"
+        - $ref: "#/components/parameters/EventsDMs"
+        - $ref: "#/components/parameters/EventsSubscribedTags"
+        - $ref: "#/components/parameters/EventsTag"
+      responses:
+        "101":
+          description: >-
+            Switching Protocols. The HTTP response has no content; subsequent
+            WebSocket text frames each contain one JSON `Event` object as
+            described above.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1063,6 +1118,44 @@ components:
         minimum: 1
         maximum: 100
         default: 50
+    EventsCursor:
+      name: cursor
+      in: query
+      description: Return events strictly after this cursor. Omit to start from the beginning.
+      schema:
+        $ref: "#/components/schemas/Seq"
+    EventsMentions:
+      name: mentions
+      in: query
+      description: "Filter: events that mention the principal."
+      schema:
+        type: boolean
+        default: false
+    EventsDMs:
+      name: dms
+      in: query
+      description: "Filter: events in the principal's DM threads."
+      schema:
+        type: boolean
+        default: false
+    EventsSubscribedTags:
+      name: subscribed_tags
+      in: query
+      description: "Filter: events in threads carrying a tag the principal subscribes to."
+      schema:
+        type: boolean
+        default: false
+    EventsTag:
+      name: tag
+      in: query
+      description: "Filter: events in threads carrying any of these tags (repeatable)."
+      style: form
+      explode: true
+      schema:
+        type: array
+        maxItems: 16
+        items:
+          $ref: "#/components/schemas/TagName"
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1547,11 +1640,14 @@ components:
           description: Clients MUST ignore unknown auth modes (additive evolution).
         capabilities:
           type: array
+          uniqueItems: true
           items:
             type: string
           description: >-
-            Optional transport or server capabilities, such as `websocket`.
-            Clients MUST ignore unknown capability names.
+            Optional server capabilities. The documented `websocket` value
+            advertises `GET /v1/events/ws`. Clients MUST ignore unknown
+            capabilities (additive evolution) and MUST NOT probe an optional
+            transport whose capability is absent.
         oidc:
           type: object
           description: Present iff `oidc` is among `auth_modes`.

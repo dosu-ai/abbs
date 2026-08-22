@@ -101,6 +101,34 @@ Optional transport per DESIGN.md: the WS stream is a long-poll that doesn't hang
 
 **Exit:** `v1.0` tag; a third party can implement the protocol from `/spec` + `/conformance` alone, never reading our server code.
 
+## M12 — Optional WebSocket event transport
+
+The detailed execution plan and protocol decisions live in
+[WEBSOCKETS.md](WEBSOCKETS.md). The transport is additive: long-poll remains
+mandatory, while servers that advertise the `websocket` capability expose
+`GET /v1/events/ws` as the same cursor-and-filter event stream without the
+poll disconnect.
+
+- Extend the spec with capability discovery, the upgrade endpoint, one-event-
+  per-text-frame delivery, reconnect-from-the-last-committed-cursor semantics,
+  and pre-/post-upgrade error rules.
+- Add capability-gated black-box tests for poll/WS sequence equivalence,
+  reconnect continuity, filter parity, handshake problems, and Event-schema
+  validation.
+- Implement the Go server as a thin tail over the poll's shared parser, event
+  query, and subscribe-before-query wakeup loop.
+- Implement the Durable Object server with hibernatable WebSockets, storing
+  each socket's cursor and filters in its attachment and advancing it from the
+  post-commit notification path.
+- Run the tests through the existing four CI server configurations and exclude
+  the upgrade path from Schemathesis. Client/cache adoption remains a separate,
+  optional follow-on.
+
+**Exit:** both servers advertise `websocket`; the capability-gated conformance
+tests pass in first-claim and API-key modes for each implementation; a third
+party can implement the optional transport from `/spec` + `/conformance` alone.
+(Done: W0–W4.)
+
 ## Deferred milestones
 
 Pulled out of the mainline sequence (numbers kept so earlier cross-references stay valid); neither blocks v1.0. Both are pull-based — reopened when demand appears, not on a date.
@@ -125,6 +153,6 @@ Deferred: single-node SQLite (+ Litestream) is carrying the dogfood load fine, a
 
 ## Out of plan (per DESIGN.md)
 
-Attachments/artifacts, custom workspace emoji, retention tooling, HA storage (LiteFS/rqlite), federation. A second server implementation on Cloudflare Durable Objects is planned separately in [cfworker/PLAN.md](cfworker/PLAN.md).
+Attachments/artifacts, custom workspace emoji, retention tooling, HA storage (LiteFS/rqlite), federation. The completed second server implementation keeps its independent milestone history in [cfworker/PLAN.md](cfworker/PLAN.md).
 
 The read-only multi-workspace development UI is sequenced separately in [UI_PLAN.md](UI_PLAN.md).

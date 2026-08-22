@@ -31,7 +31,7 @@ Companion to [DESIGN.md](../DESIGN.md), [IMPLEMENTATION.md](../IMPLEMENTATION.md
 - Per-DO in-memory waiter set (resolve functions) replaces the Go broadcast channel; after every committed event append, resolve and clear all waiters.
 - **Subscribe-before-query ordering**, exactly as the Go store mandates: create the waiter promise, then run the events query, then `Promise.race([waiter, timeout, abort])`, loop. An append between query and park still wakes us.
 - Parked waiters await plain promises, so DO input gates stay open — other requests proceed while polls are parked. Empty batch at deadline echoes the request cursor (the dumb-safe client loop). Cap parked waiters (~256; unreachable in conformance).
-- 60s holds are within platform limits (no wall-clock cap on DO requests; parked promises cost no CPU). Cost note: constant polling pins the DO active (duration billing) — an always-polled workspace is an always-on DO. Accepted; it's the protocol (the WebSockets note under Out of scope records the escape hatch).
+- 60s holds are within platform limits (no wall-clock cap on DO requests; parked promises cost no CPU). Cost note: constant polling pins the DO active (duration billing) — an always-polled workspace is an always-on DO. Long-poll remains mandatory, while M-G's hibernatable WebSocket transport lets capable clients avoid that idle cost.
 
 ### Write middleware
 
@@ -88,7 +88,7 @@ Rejected alternatives: wrangler-CLI-only ceremony (no direct-manipulation tool e
 
 ## Milestones
 
-Lettered M-A…M-F to avoid colliding with the root PLAN.md numbering.
+Lettered M-A…M-G to avoid colliding with the root PLAN.md numbering.
 
 ### M-A — Walking skeleton (mirrors M2)
 
@@ -112,7 +112,7 @@ Lettered M-A…M-F to avoid colliding with the root PLAN.md numbering.
 ### M-D — Unit tests + CI
 
 - vitest-pool-workers tests for what the black-box suite can't reach (see Testing below).
-- New `cfworker` CI job in `.github/workflows/ci.yml`: typecheck + unit tests, then boot `wrangler dev` twice — first-claim on port 8787, `-e apikey` on port 8788 with a generated `ADMIN_BOOTSTRAP_TOKEN` in `.dev.vars` — and run the Go conformance suite against each (`--persist-to "$(mktemp -d)"` isolates state per run; readiness polls on `/v1/server`); schemathesis run mirroring the existing fuzz job (claim a token, `--exclude-path /v1/events`, same checks).
+- New `cfworker` CI job in `.github/workflows/ci.yml`: typecheck + unit tests, then boot `wrangler dev` twice — first-claim on port 8787, `-e apikey` on port 8788 with a generated `ADMIN_BOOTSTRAP_TOKEN` in `.dev.vars` — and run the Go conformance suite against each (`--persist-to "$(mktemp -d)"` isolates state per run; readiness polls on `/v1/server`); schemathesis run mirroring the existing fuzz job (claim a token, exclude `/v1/events` and `/v1/events/ws`, same checks).
 
 **Exit:** the CI job is green and required; a PR that breaks a spec behavior fails CI via the Go suite.
 
@@ -126,6 +126,22 @@ Explicitly out of this plan's committed scope, per the spec-proof-first position
 - Root DESIGN.md's deferred line updated to done.
 
 **Exit:** PLAN.md M11's claim is demonstrated, with receipts.
+
+### M-G — Hibernatable WebSocket transport
+
+Implement the Cloudflare half of the optional transport defined in
+[WEBSOCKETS.md](../WEBSOCKETS.md) W3: advertise `websocket`, expose
+`GET /v1/events/ws`, catch up from the supplied cursor, then tail through the
+post-commit notification path. Use `ctx.acceptWebSocket` so idle connections
+hibernate; persist each principal, cursor, and filter in the socket attachment;
+and retain long-poll as the mandatory fallback. Attachment-size refusal,
+connection caps, close codes, and the no-server-ping choice follow the shared
+transport plan.
+
+**Exit:** the capability-gated WebSocket conformance tests pass against
+`wrangler dev` in first-claim and API-key modes; workerd unit tests cover
+attachment/cursor delivery and rejection paths; a manual local run verifies
+the upgrade path. (Done.)
 
 ## Testing
 
@@ -156,7 +172,6 @@ The black-box suite is the definition of done; unit tests (vitest-pool-workers, 
 
 - **OIDC surface** (`/v1/agents*`, `/v1/tokens/refresh`) — spec-only in the Go server too (M10); not needed for conformance.
 - **Multi-workspace hosting** — hostname → workspace routing stays a documented config door in `src/index.ts`.
-- **WebSockets / DO hibernation** — deferred, not rejected. The protocol is long-poll and every client speaks it, so long-poll gets implemented regardless. But hibernatable WebSockets (`ctx.acceptWebSocket`) invert the cost story on DOs: a parked long-poll pins the DO active, while hibernating sockets let it sleep between events — near-zero cost for idle-but-connected clients. The cursor model makes catch-up-over-WS a clean additive `/v1` extension (connect with cursor + filters → replay past events → tail; reconnect = resend last-applied cursor; per-socket cursor/filters survive hibernation via `serializeAttachment`). A natural M-G if long-poll duration billing ever bites.
 - **Client changes** — the Go MCP client, cache, and generated SDKs must work unchanged against this server (verified at the M-B dogfood gate).
 - **Retention/compaction** — purge-on-write for idempotency only; the 10 GB DO cap is the ceiling, unmanaged in v1.
 - **HA/Litestream analogues** — DO storage's built-in durability and point-in-time recovery replace them.
