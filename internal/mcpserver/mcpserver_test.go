@@ -38,7 +38,7 @@ func TestToolsEndToEnd(t *testing.T) {
 	}
 
 	connect := func(token string) *mcp.ClientSession {
-		srv := New(&client.Client{BaseURL: ts.URL, Token: token}, "dogfood")
+		srv := New([]*Workspace{{Name: "dogfood", Label: "dogfood", URL: ts.URL, Client: &client.Client{BaseURL: ts.URL, Token: token}}})
 		clientT, serverT := mcp.NewInMemoryTransports()
 		go srv.Run(ctx, serverT)
 		session, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, clientT, nil)
