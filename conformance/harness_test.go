@@ -38,6 +38,8 @@ import (
 
 	"github.com/pb33f/libopenapi"
 	validator "github.com/pb33f/libopenapi-validator"
+	"github.com/pb33f/libopenapi-validator/schema_validation"
+	"github.com/pb33f/libopenapi/datamodel/high/base"
 )
 
 var (
@@ -47,8 +49,10 @@ var (
 	authMode   string // the target's mode: "first-claim" or "api-key"
 	adminToken string // provisioning credential (api-key mode only)
 
-	specValidator validator.Validator
-	specMu        sync.Mutex
+	specValidator  validator.Validator
+	specMu         sync.Mutex
+	eventSchema    *base.Schema
+	eventValidator schema_validation.SchemaValidator
 )
 
 func TestMain(m *testing.M) { os.Exit(mainRun(m)) }
@@ -68,6 +72,19 @@ func mainRun(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "conformance: cannot parse spec: %v\n", err)
 		return 1
 	}
+	model, err := doc.BuildV3Model()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "conformance: cannot build spec model: %v\n", err)
+		return 1
+	}
+	eventProxy, ok := model.Model.Components.Schemas.Get("Event")
+	if !ok || eventProxy == nil || eventProxy.Schema() == nil {
+		fmt.Fprintln(os.Stderr, "conformance: spec has no usable components.schemas.Event")
+		return 1
+	}
+	eventSchema = eventProxy.Schema()
+	eventValidator = schema_validation.NewSchemaValidator()
+	defer eventValidator.Release()
 	v, errs := validator.NewValidator(doc)
 	if len(errs) > 0 {
 		fmt.Fprintf(os.Stderr, "conformance: cannot build validator: %v\n", errs)
@@ -294,10 +311,21 @@ func (c *Client) do(method, path string, body any, hdr map[string]string) result
 	if err != nil {
 		c.t.Fatalf("%s %s: %v", method, path, err)
 	}
-	raw, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		c.t.Fatalf("%s %s: read body: %v", method, path, err)
+	return validateHTTPResponse(c.t, req, resp)
+}
+
+// validateHTTPResponse applies the same OpenAPI response validation to HTTP
+// exchanges made outside Client.do, notably failed WebSocket handshakes.
+func validateHTTPResponse(t *testing.T, req *http.Request, resp *http.Response) result {
+	t.Helper()
+	var raw []byte
+	var err error
+	if resp.Body != nil {
+		raw, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("%s %s: read body: %v", req.Method, req.URL.Path, err)
+		}
 	}
 
 	resp.Body = io.NopCloser(bytes.NewReader(raw))
@@ -306,7 +334,7 @@ func (c *Client) do(method, path string, body any, hdr map[string]string) result
 	specMu.Unlock()
 	if !ok {
 		for _, verr := range verrs {
-			c.t.Errorf("spec violation on %s %s (%d): %s — %s", method, path, resp.StatusCode, verr.Message, verr.Reason)
+			t.Errorf("spec violation on %s %s (%d): %s — %s", req.Method, req.URL.Path, resp.StatusCode, verr.Message, verr.Reason)
 		}
 	}
 	return result{status: resp.StatusCode, header: resp.Header, body: raw}

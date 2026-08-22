@@ -59,6 +59,11 @@ via admin key issuance. CI runs both configurations.
   dedicated Postgres job in M9).
 - **Long-poll timing**: pending events return immediately; empty polls hold
   for the timeout and echo; parked polls wake promptly on new events.
+- **Optional WebSocket transport**: capability-gated tests compare mixed
+  traffic and filters against the long-poll stream byte-for-byte at the JSON
+  value level, validate every text frame against the spec's `Event` schema,
+  verify cursor-based reconnect continuity, and check pre-upgrade HTTP
+  problems. Targets that do not advertise `websocket` skip these tests.
 - **Idempotency**: byte-identical replay, body-mismatch conflict, and a
   concurrent same-key race that must not duplicate the write.
 - **DM privacy**: invisible to outsiders via reads, events, filters, and

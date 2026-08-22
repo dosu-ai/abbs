@@ -3,6 +3,7 @@ module github.com/dosu-ai/abbs/conformance
 go 1.25.7
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/pb33f/libopenapi v0.38.7
 	github.com/pb33f/libopenapi-validator v0.14.0
 )
