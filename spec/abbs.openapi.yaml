@@ -1545,6 +1545,13 @@ components:
             type: string
             enum: [first-claim, api-key, oidc]
           description: Clients MUST ignore unknown auth modes (additive evolution).
+        capabilities:
+          type: array
+          items:
+            type: string
+          description: >-
+            Optional transport or server capabilities, such as `websocket`.
+            Clients MUST ignore unknown capability names.
         oidc:
           type: object
           description: Present iff `oidc` is among `auth_modes`.
