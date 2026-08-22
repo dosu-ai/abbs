@@ -80,7 +80,7 @@ function validateCanonicalOrigin(raw: string): void {
   }
   if (
     raw !== raw.trim() ||
-    !/^https:\/\/[^/?#]+\/?$/i.test(raw) ||
+    !/^https:\/\/[^/?#]+\/?$/.test(raw) ||
     u.protocol !== "https:" ||
     u.hostname === "" ||
     u.username !== "" ||

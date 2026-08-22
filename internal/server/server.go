@@ -37,6 +37,7 @@ const (
 	AuthAPIKey        = "api-key"     // admin-issued static keys; claiming is off
 	VisibilityPrivate = "private"
 	VisibilityPublic  = "public"
+	maxLimiterBuckets = 16_384
 )
 
 // Config tunes a server instance. Zero values take documented defaults.
@@ -46,6 +47,9 @@ type Config struct {
 	WorkspaceVisibility       string
 	WorkspaceCanonicalURL     string
 	WorkspaceDirectoryListing bool
+	// TrustedProxyCIDRs enables X-Forwarded-For only when the TCP peer is in
+	// one of these networks. Leave empty when the server is directly exposed.
+	TrustedProxyCIDRs []string
 
 	// AuthMode selects the credential ceremony: AuthFirstClaim (default)
 	// or AuthAPIKey.
@@ -130,6 +134,11 @@ func (c Config) withDefaults() (Config, error) {
 }
 
 func validateCanonicalOrigin(raw string) error {
+	// net/url normalizes schemes to lowercase, so enforce the wire contract's
+	// literal lowercase prefix before parsing.
+	if !strings.HasPrefix(raw, "https://") {
+		return errors.New("must be a valid HTTPS origin")
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return errors.New("must be a valid HTTPS origin")
@@ -142,6 +151,19 @@ func validateCanonicalOrigin(raw string) error {
 	return nil
 }
 
+func parseTrustedProxyCIDRs(raw []string) ([]*net.IPNet, error) {
+	out := make([]*net.IPNet, 0, len(raw))
+	for _, cidr := range raw {
+		cidr = strings.TrimSpace(cidr)
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("trusted proxy %q must be an IP CIDR", cidr)
+		}
+		out = append(out, network)
+	}
+	return out, nil
+}
+
 type Server struct {
 	store            *store.Store
 	cfg              Config
@@ -149,12 +171,17 @@ type Server struct {
 	limits           api.Limits
 	limiter          *limiter
 	anonymousLimiter *limiter
+	trustedProxies   []*net.IPNet
 	idemLocks        sync.Map // (principal, endpoint, key) -> *sync.Mutex
 }
 
 func New(st *store.Store, cfg Config) (http.Handler, error) {
 	var err error
 	cfg, err = cfg.withDefaults()
+	if err != nil {
+		return nil, err
+	}
+	trustedProxies, err := parseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs)
 	if err != nil {
 		return nil, err
 	}
@@ -170,8 +197,9 @@ func New(st *store.Store, cfg Config) (http.Handler, error) {
 		store:            st,
 		cfg:              cfg,
 		limits:           limits,
-		limiter:          newLimiter(cfg.WriteBurst, cfg.WriteRefillPerSec),
-		anonymousLimiter: newLimiter(cfg.AnonymousBurst, cfg.AnonymousRefillPerSec),
+		limiter:          newLimiter(cfg.WriteBurst, cfg.WriteRefillPerSec, maxLimiterBuckets),
+		anonymousLimiter: newLimiter(cfg.AnonymousBurst, cfg.AnonymousRefillPerSec, maxLimiterBuckets),
+		trustedProxies:   trustedProxies,
 		info: api.ServerInfo{
 			APIVersion: "v1",
 			Workspace: api.Workspace{
@@ -305,7 +333,7 @@ func (s *Server) conditionalReadViewer(w http.ResponseWriter, r *http.Request) (
 }
 
 func (s *Server) allowAnonymous(w http.ResponseWriter, r *http.Request) bool {
-	if ok, retryAfter := s.anonymousLimiter.allow(anonymousClientKey(r), time.Now()); !ok {
+	if ok, retryAfter := s.anonymousLimiter.allow(s.anonymousClientKey(r), time.Now()); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 		writeProblem(w, http.StatusTooManyRequests, "rate-limited", "anonymous read rate limit")
 		return false
@@ -313,15 +341,46 @@ func (s *Server) allowAnonymous(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func anonymousClientKey(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil && host != "" {
-		return host
+func remoteIP(remoteAddr string) net.IP {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err == nil {
+		return net.ParseIP(host)
 	}
-	if net.ParseIP(r.RemoteAddr) != nil {
-		return r.RemoteAddr
+	return net.ParseIP(remoteAddr)
+}
+
+func ipInNetworks(ip net.IP, networks []*net.IPNet) bool {
+	for _, network := range networks {
+		if network.Contains(ip) {
+			return true
+		}
 	}
-	return "anonymous:fallback"
+	return false
+}
+
+// anonymousClientKey trusts X-Forwarded-For only across an explicitly
+// configured proxy chain. Walking from the TCP peer toward the client avoids
+// accepting attacker-supplied entries a well-behaved proxy appended to.
+func (s *Server) anonymousClientKey(r *http.Request) string {
+	peer := remoteIP(r.RemoteAddr)
+	if peer == nil {
+		return "anonymous:fallback"
+	}
+	client := peer
+	if ipInNetworks(peer, s.trustedProxies) {
+		var chain []string
+		for _, value := range r.Header.Values("X-Forwarded-For") {
+			chain = append(chain, strings.Split(value, ",")...)
+		}
+		for i := len(chain) - 1; i >= 0 && ipInNetworks(client, s.trustedProxies); i-- {
+			next := net.ParseIP(strings.TrimSpace(chain[i]))
+			if next == nil {
+				return peer.String()
+			}
+			client = next
+		}
+	}
+	return client.String()
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -625,6 +684,16 @@ func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tags := normalizeTags(q["tag"])
+	if len(tags) > s.limits.ThreadMaxTags {
+		writeProblem(w, http.StatusBadRequest, "validation", fmt.Sprintf("at most %d tag filters", s.limits.ThreadMaxTags))
+		return
+	}
+	for _, tag := range tags {
+		if utf8.RuneCountInString(tag) > s.limits.TagMaxChars {
+			writeProblem(w, http.StatusBadRequest, "validation", fmt.Sprintf("tag %q over %d characters", tag, s.limits.TagMaxChars))
+			return
+		}
+	}
 	items, nextPage, asOf, err := s.store.ListThreads(viewer, since, before, tags, limit)
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "internal", err.Error())

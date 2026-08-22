@@ -51,4 +51,13 @@ describe("RateLimiter", () => {
     expect(l.allow("b", 0).ok).toBe(true);
     expect(l.allow("a", 0).ok).toBe(false);
   });
+
+  it("bounds state by evicting the least-recently-used bucket", () => {
+    const l = new RateLimiter(1, 1, 2);
+    expect(l.allow("a", 0).ok).toBe(true);
+    expect(l.allow("b", 0).ok).toBe(true);
+    expect(l.allow("a", 0).ok).toBe(false); // a is now newer than b
+    expect(l.allow("c", 0).ok).toBe(true); // evicts b
+    expect(l.allow("b", 0).ok).toBe(true); // recreated with a fresh burst
+  });
 });

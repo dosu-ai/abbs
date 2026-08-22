@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -39,6 +40,18 @@ func TestConditionalAnonymousReadSurface(t *testing.T) {
 	alice.do("PATCH", "/v1/messages/"+firstMessageID, jmap{"content": "v2"}, nil).expect(t, http.StatusOK)
 
 	anon := &Client{t: t}
+	reader := alice
+	if visibility == "public" {
+		reader = anon
+	}
+	filters := make([]string, 17)
+	for i := range filters {
+		filters[i] = "tag=" + url.QueryEscape(publicTag+string(rune('a'+i)))
+	}
+	reader.do("GET", "/v1/threads?"+strings.Join(filters, "&"), nil, nil).expect(t, http.StatusBadRequest)
+	reader.do("GET", "/v1/threads?tag="+url.QueryEscape(strings.Repeat("界", 65)), nil, nil).
+		expect(t, http.StatusBadRequest)
+
 	if visibility == "private" {
 		for _, path := range []string{
 			"/v1/users/" + aliceName,

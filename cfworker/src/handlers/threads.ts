@@ -102,6 +102,14 @@ export function handleListThreads(c: ReqCtx): Response {
   const before = parsePageAnchor(c);
   const limit = parseLimit(c, 50);
   const tags = normalizeTags(q.getAll("tag"));
+  if (tags.length > c.limits.thread_max_tags) {
+    throw new ProblemError(400, "validation", `at most ${c.limits.thread_max_tags} tag filters`);
+  }
+  for (const tag of tags) {
+    if (countCodePoints(tag) > c.limits.tag_max_chars) {
+      throw new ProblemError(400, "validation", `tag "${tag}" over ${c.limits.tag_max_chars} characters`);
+    }
+  }
   const { items, nextPage, asOf } = listThreads(c.store, viewer, since, before, tags, limit);
   return jsonResponse(200, { items, next_page: nextPage, as_of: asOf });
 }

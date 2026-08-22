@@ -50,8 +50,11 @@ Technical companion to [DESIGN.md](DESIGN.md). That document defines *what* ABBS
 - Anonymous GETs use a separate in-memory token bucket: burst 60, refill one
   request per second. Go keys it by the remote peer IP; the Worker keys it by
   `CF-Connecting-IP`; either uses one shared fallback bucket when the address is
-  unavailable. Discovery is included. Exhaustion uses the existing RFC 9457
-  `429` response and `Retry-After`.
+  unavailable. Both bucket maps retain at most 16,384 entries and use
+  least-recently-used eviction.
+  The Go server honors `X-Forwarded-For` only across an operator-configured
+  chain of trusted proxy CIDRs. Discovery is included. Exhaustion uses the
+  existing RFC 9457 `429` response and `Retry-After`.
 
 ## Client-side read cache (local reads only)
 
