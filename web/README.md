@@ -109,7 +109,7 @@ every non-delisted row and is the only writer of the health columns:
 Delisted rows are never contacted and never resurrected (`recordCheck` and
 the sweep both guard on `status != 'delisted'`).
 
-Locally, `npm run dev` passes `--test-scheduled`; trigger a sweep with:
+Locally, `pnpm dev` passes `--test-scheduled`; trigger a sweep with:
 
 ```sh
 curl "http://localhost:8787/__scheduled?cron=*+*+*+*+*"
@@ -122,19 +122,19 @@ Moderation is deliberately out-of-band D1 statements, not a public surface
 
 ```sh
 # Delist a workspace (keeps the row and slug; never auto-relisted):
-npx wrangler d1 execute abbs-directory --local --command \
+pnpm exec wrangler d1 execute abbs-directory --local --command \
   "UPDATE workspaces SET status='delisted', last_error_code='operator-removed' WHERE slug='SLUG'"
 
 # Relist: return it to pending; the next sweep re-verifies and reactivates:
-npx wrangler d1 execute abbs-directory --local --command \
+pnpm exec wrangler d1 execute abbs-directory --local --command \
   "UPDATE workspaces SET status='pending', last_error_code=NULL WHERE slug='SLUG' AND status='delisted'"
 ```
 
 ## One-command demo
 
 ```sh
-npm install
-npm run demo              # → http://localhost:8787
+pnpm install
+pnpm demo                 # → http://localhost:8787
 ```
 
 Boots a throwaway public Go workspace (port 18080) filled with demo threads
@@ -146,10 +146,10 @@ run reseeds from scratch. Ports are overridable via `DEMO_UPSTREAM_PORT` /
 ## Local development
 
 ```sh
-npm install
-npm run db:migrate:local
-npm run db:seed:local     # registers the two local test workspaces
-npm run dev               # http://localhost:8787
+pnpm install
+pnpm db:migrate:local
+pnpm db:seed:local        # registers the two local test workspaces
+pnpm dev                  # http://localhost:8787
 ```
 
 The seed rows point at the two Phase 1 public test workspaces. Run them in
@@ -162,7 +162,7 @@ go run ./cmd/abbs serve -addr 127.0.0.1:8080 -db /tmp/abbs-web-demo.db \
   -visibility public -canonical-url https://local-go.example -directory-listing
 
 # Durable Object server, public visibility, port 8789
-cd cfworker && npx wrangler dev -e public --port 8789
+cd cfworker && pnpm exec wrangler dev -e public --port 8789
 ```
 
 Without them the directory still renders; the boards are labeled
@@ -171,8 +171,8 @@ UNREACHABLE instead of failing.
 ## Checks
 
 ```sh
-npm run typecheck   # worker (strict TS) + browser script (checkJs)
-npm test            # vitest-pool-workers on workerd: unit + integration
+pnpm typecheck      # worker (strict TS) + browser script (checkJs)
+pnpm test           # vitest-pool-workers on workerd: unit + integration
 ```
 
 The tests cover the markdown attack corpus, proxy allowlisting/limits/caching,

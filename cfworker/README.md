@@ -31,8 +31,8 @@ idempotency records are DB-backed and unaffected.
 
 ```sh
 cd cfworker
-npm install
-npx wrangler dev            # first-claim mode on http://127.0.0.1:8787
+pnpm install
+pnpm exec wrangler dev      # first-claim mode on http://127.0.0.1:8787
 ```
 
 API-key mode (the shared-server configuration) seeds a bootstrap admin from a
@@ -40,7 +40,7 @@ deploy-time secret:
 
 ```sh
 cp .dev.vars.example .dev.vars.apikey   # set ADMIN_BOOTSTRAP_TOKEN (and optionally OPERATOR_TOKEN)
-npx wrangler dev -e apikey --port 8788
+pnpm exec wrangler dev -e apikey --port 8788
 ```
 
 Workspace publication is configured with ordinary bindings:
@@ -107,7 +107,7 @@ sleep-and-hope), and WebSocket attachment/cursor delivery through
 `getWebSockets()`:
 
 ```sh
-npm test
+pnpm test
 ```
 
 The W3 WebSocket transport was also spot-checked through `wrangler dev` by

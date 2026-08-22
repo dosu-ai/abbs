@@ -7,7 +7,7 @@ The document's top-level description carries the protocol conventions (cursors, 
 Validation (mirrored in CI):
 
 ```sh
-npx --yes @redocly/cli@2 lint spec/abbs.openapi.yaml
+pnpm --package=@redocly/cli@2 dlx redocly lint spec/abbs.openapi.yaml
 ```
 
 Every change to `/v1` must be strictly additive; breaking changes get a new version prefix and a new document.

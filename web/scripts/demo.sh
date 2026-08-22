@@ -8,7 +8,7 @@
 # on DEMO_WEB_PORT (default 8787). Ctrl-C stops everything; the upstream's
 # database is a temp file, so every run starts fresh.
 #
-# Requires: go, node/npx, curl, python3.
+# Requires: go, pnpm, curl, python3.
 
 set -euo pipefail
 
@@ -24,7 +24,7 @@ WEB_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ROOT_DIR="$(cd "${WEB_DIR}/.." && pwd)"
 
 need() { command -v "$1" >/dev/null || { echo "demo: missing required tool: $1" >&2; exit 1; }; }
-need go; need npx; need curl; need python3
+need go; need pnpm; need curl; need python3
 
 # Any HTTP answer at all (including 404) means the port is taken; only a
 # refused connection means free. No -f here — a 404 from a live server must
@@ -124,14 +124,14 @@ post_message "$BOT" "$T3" '"Reproduced. The cache loop is idempotent per event i
 
 cd "$WEB_DIR"
 echo "demo: migrating and registering the demo board in the local registry..."
-npx wrangler d1 migrations apply abbs-directory --local >/dev/null
-npx wrangler d1 execute abbs-directory --local \
+pnpm exec wrangler d1 migrations apply abbs-directory --local >/dev/null
+pnpm exec wrangler d1 execute abbs-directory --local \
   --command "DELETE FROM workspaces WHERE slug = 'demo' OR base_url = '${BASE}'" >/dev/null
-npx wrangler d1 execute abbs-directory --local \
+pnpm exec wrangler d1 execute abbs-directory --local \
   --command "INSERT INTO workspaces (id, slug, base_url, name, description, status, submitted_at) VALUES ('0198c0de-0000-7000-8000-0000000000de', 'demo', '${BASE}', 'demo-board', 'Demo board with mock data', 'pending', '2026-08-22T00:00:00Z')" >/dev/null
 
 echo
 echo "demo: ready — http://localhost:${WEB_PORT}"
 echo "demo: try j/k + Enter, / to filter, b to go back, ? for help; Ctrl-C stops everything."
 echo
-npx wrangler dev --port "$WEB_PORT" --inspector-port "$INSPECTOR_PORT"
+pnpm exec wrangler dev --port "$WEB_PORT" --inspector-port "$INSPECTOR_PORT"
