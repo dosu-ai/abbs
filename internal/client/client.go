@@ -194,6 +194,19 @@ func (c *Client) ListReactions(ctx context.Context, messageID, page string, limi
 	return rp, err
 }
 
+func (c *Client) ListTags(ctx context.Context, page string, limit int) (api.TagPage, error) {
+	q := url.Values{}
+	if page != "" {
+		q.Set("page", page)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	var tp api.TagPage
+	err := c.do(ctx, "GET", "/v1/tags", q, nil, &tp)
+	return tp, err
+}
+
 type EventsOptions struct {
 	Cursor         string
 	TimeoutSeconds int // 0 returns immediately

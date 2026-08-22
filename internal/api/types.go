@@ -193,10 +193,11 @@ func DefaultLimits() Limits {
 }
 
 type ServerInfo struct {
-	APIVersion string    `json:"api_version"`
-	Workspace  Workspace `json:"workspace"`
-	AuthModes  []string  `json:"auth_modes"`
-	Limits     Limits    `json:"limits"`
+	APIVersion   string    `json:"api_version"`
+	Workspace    Workspace `json:"workspace"`
+	AuthModes    []string  `json:"auth_modes"`
+	Capabilities []string  `json:"capabilities,omitempty"`
+	Limits       Limits    `json:"limits"`
 }
 
 // Problem is the RFC 9457 error shape used everywhere.
