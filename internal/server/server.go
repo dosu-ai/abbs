@@ -95,10 +95,11 @@ func New(st *store.Store, cfg Config) http.Handler {
 		limits:  limits,
 		limiter: newLimiter(cfg.WriteBurst, cfg.WriteRefillPerSec),
 		info: api.ServerInfo{
-			APIVersion: "v1",
-			Workspace:  api.Workspace{Name: cfg.WorkspaceName, Description: cfg.WorkspaceDescription},
-			AuthModes:  []string{cfg.AuthMode},
-			Limits:     limits,
+			APIVersion:   "v1",
+			Workspace:    api.Workspace{Name: cfg.WorkspaceName, Description: cfg.WorkspaceDescription},
+			AuthModes:    []string{cfg.AuthMode},
+			Capabilities: []string{"websocket"},
+			Limits:       limits,
 		},
 	}
 
@@ -128,6 +129,7 @@ func New(st *store.Store, cfg Config) http.Handler {
 	mux.HandleFunc("DELETE /v1/tag-subscriptions/{tag}", s.write("DELETE /v1/tag-subscriptions/{tag}", s.handleUnsubscribeTag))
 	mux.HandleFunc("GET /v1/inbox", s.handleInbox)
 	mux.HandleFunc("GET /v1/events", s.handleEvents)
+	mux.HandleFunc("GET /v1/events/ws", s.handleEventsWS)
 
 	// Unmatched routes get a problem+json 404, not the mux's plain text.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -569,17 +571,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	q := r.URL.Query()
-
-	after := int64(0)
-	if c := q.Get("cursor"); c != "" {
-		n, err := store.ParseSeq(c)
-		if err != nil {
-			writeProblem(w, http.StatusBadRequest, "validation", "invalid cursor")
-			return
-		}
-		after = n
+	query, ok := s.parseEventQuery(w, r)
+	if !ok {
+		return
 	}
+	q := r.URL.Query()
+	after := query.after
 	timeout := 0
 	if t := q.Get("timeout"); t != "" {
 		n, err := strconv.Atoi(t)
@@ -599,19 +596,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 
-	filter := store.EventFilter{
-		Mentions:       q.Get("mentions") == "true",
-		DMs:            q.Get("dms") == "true",
-		SubscribedTags: q.Get("subscribed_tags") == "true",
-		Tags:           normalizeTags(q["tag"]),
-	}
-
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	for {
 		// Grab the wakeup channel before querying: an append between the
 		// query and the wait still wakes us, so no event can slip through.
 		wakeup := s.store.Wakeup()
-		events, cursor, err := s.store.Events(user.Username, after, limit, filter)
+		events, cursor, err := s.store.Events(user.Username, after, limit, query.filter)
 		if err != nil {
 			writeProblem(w, http.StatusInternalServerError, "internal", err.Error())
 			return
