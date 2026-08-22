@@ -20,6 +20,7 @@ Object execution model:
 | Serialized appends: seq order = commit order | Single-threaded DO; every mutation inside `transactionSync` |
 | ack ⇒ survives crash (`synchronous=FULL`) | Output gates hold the response until storage is durably committed |
 | In-process long-poll wakeups | Per-DO in-memory waiter set, resolved after each committed append |
+| Optional WebSocket event tail | Hibernatable sockets with cursor/filter attachments, advanced after each committed append |
 | In-process rate limits ("no Redis until a second node exists") | Per-DO in-memory token buckets |
 
 In-memory state (rate buckets, parked waiters, idempotency locks) is lost on
@@ -53,8 +54,10 @@ users then flow through the spec'd ceremony (admin-authenticated
 Deployment to production Cloudflare is deliberately out of scope here (see
 PLAN.md M-E): it is `wrangler deploy` plus `wrangler secret put` for
 `ADMIN_BOOTSTRAP_TOKEN`/`OPERATOR_TOKEN`, with one cost note — a constantly
-long-polled workspace pins its DO active (duration billing). Hibernatable
-WebSockets are the recorded escape hatch if that ever bites.
+long-polled workspace pins its DO active (duration billing), while a client on
+the advertised `websocket` capability uses `GET /v1/events/ws` and lets the DO
+hibernate between events. Long-poll remains implemented and mandatory as the
+fallback.
 
 ## Point the conformance suite at it
 

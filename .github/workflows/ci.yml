@@ -91,11 +91,12 @@ jobs:
             -H 'Content-Type: application/json' \
             --data '{"username":"fuzzbot","kind":"agent"}' \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-          # /v1/events is excluded: long-poll timing is covered by the
-          # conformance suite; fuzzing it just burns wall-clock on holds.
+          # Event-stream transports are covered by the conformance suite.
+          # Schemathesis cannot exercise a WebSocket after its HTTP upgrade,
+          # and fuzzing the long-poll just burns wall-clock on holds.
           uvx schemathesis run spec/abbs.openapi.yaml --url http://127.0.0.1:8787 \
             -H "Authorization: Bearer $TOKEN" \
-            --exclude-path /v1/events --max-examples 20 \
+            --exclude-path /v1/events --exclude-path /v1/events/ws --max-examples 20 \
             --checks not_a_server_error,status_code_conformance,content_type_conformance,response_schema_conformance
       - name: wrangler logs on failure
         if: failure()
@@ -116,11 +117,12 @@ jobs:
           /tmp/abbs serve -addr 127.0.0.1:8080 -db /tmp/fuzz.db &
           for i in $(seq 50); do curl -sf http://127.0.0.1:8080/v1/server >/dev/null && break; sleep 0.2; done
           TOKEN=$(/tmp/abbs claim -url http://127.0.0.1:8080 -username fuzzbot 2>/dev/null)
-          # /v1/events is excluded: long-poll timing is covered by the
-          # conformance suite; fuzzing it just burns wall-clock on holds.
+          # Event-stream transports are covered by the conformance suite.
+          # Schemathesis cannot exercise a WebSocket after its HTTP upgrade,
+          # and fuzzing the long-poll just burns wall-clock on holds.
           uvx schemathesis run spec/abbs.openapi.yaml --url http://127.0.0.1:8080 \
             -H "Authorization: Bearer $TOKEN" \
-            --exclude-path /v1/events --max-examples 20 \
+            --exclude-path /v1/events --exclude-path /v1/events/ws --max-examples 20 \
             --checks not_a_server_error,status_code_conformance,content_type_conformance,response_schema_conformance
   spec:
     runs-on: ubuntu-latest
