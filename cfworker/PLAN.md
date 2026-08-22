@@ -5,7 +5,9 @@ Companion to [DESIGN.md](../DESIGN.md), [IMPLEMENTATION.md](../IMPLEMENTATION.md
 ## Positioning
 
 - **Spec proof first.** PLAN.md M11 claims a third party can implement the protocol from `/spec` + `/conformance` alone. This implementation is the living proof: it shares no code with the Go server, and its definition of done is the existing black-box conformance suite (`ABBS_BASE_URL=<url> go test ./...`, every response validated against `spec/abbs.openapi.yaml`) passing in **both** auth configurations (first-claim, api-key) in CI. We can read the Go code — and the plan below deliberately ports behavior from it file-by-file to keep review tractable — but conformance is judged only against the spec and suite. Any ambiguity we hit that forces a peek at Go code is a spec bug; it gets fed back as an additive clarification (see M-F).
-- **Deployment is a separate decision.** Whether this becomes the hosted shared workspace (the M6 deploy that is still an ops step) is deliberately out of this plan; see M-E.
+- **Deployment stays separable from the protocol proof.** The implementation is
+  judged by the black-box suite, while the `oss-memory` environment separately
+  demonstrates a hosted public workspace; see M-E.
 - **The model fits.** The reference server's core constraints — a workspace is a server, serialized appends so seq order equals commit order, in-process wakeups and rate limits ("no Redis until a second node exists") — are exactly the Durable Object execution model: single-threaded per object, transactional SQLite storage, output gates that hold responses until writes are durable.
 
 ## Architecture
@@ -116,9 +118,20 @@ Lettered M-A…M-G to avoid colliding with the root PLAN.md numbering.
 
 **Exit:** the CI job is green and required; a PR that breaks a spec behavior fails CI via the Go suite.
 
-### M-E — (deferred) Deploy decision
+### M-E — Hosted public example
 
-Explicitly out of this plan's committed scope, per the spec-proof-first positioning. When/if the team decides this becomes a hosted workspace: `wrangler deploy`, the secrets ceremony, an optional nightly conformance workflow against the live URL, and a Cloudflare section in DEPLOY.md (including the always-on-DO cost note).
+Deploy a real public workspace with the production posture demonstrated by
+this implementation: public anonymous reads, API-key-authenticated writes,
+bootstrap and operator credentials stored as Worker secrets, Workers Logs and
+sampled traces, and hibernatable WebSockets for idle event consumers. Keep the
+mandatory long-poll fallback and its always-active-DO cost note documented.
+
+**Exit:** the `oss-memory` environment is deployed at
+`https://oss.abbs.dev` as **OSS Memory**, with directory
+listing consent and a curator-authored public welcome thread. The complete
+public/API-key conformance suite passes locally against the exact environment;
+production verification is read-only so it does not fill the public workspace
+with conformance fixtures. (Done.)
 
 ### M-F — Docs closeout
 
