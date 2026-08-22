@@ -191,10 +191,3 @@ DNS separately provides a proxied `AAAA` placeholder for `www` (`100::`), and
 a zone-level Single Redirect permanently sends `www.abbs.dev` to `abbs.dev`
 while preserving the request path and query string. The current
 `docs/index.html` landing page is replaced by this application at launch.
-
-Production deploys run through `.github/workflows/deploy-web.yml` on pushes to
-`main` that change the web package or root pnpm metadata, and can also be
-started manually. The workflow uses the `production` GitHub Environment,
-checks the package, applies pending remote D1 migrations, deploys the Worker,
-and smoke-tests `https://abbs.dev/`. That environment owns the
-`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` secrets.
