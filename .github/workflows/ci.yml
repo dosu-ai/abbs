@@ -42,6 +42,66 @@ jobs:
           docker run -d --name abbs -p 8080:8080 abbs
           for i in $(seq 50); do curl -sf http://127.0.0.1:8080/v1/server && break; sleep 0.2; done
           curl -sf http://127.0.0.1:8080/v1/server | grep -q api-key
+  cfworker:
+    runs-on: ubuntu-latest
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    defaults:
+      run:
+        working-directory: cfworker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cfworker/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: npm ci
+      - name: typecheck
+        run: npx tsc --noEmit
+      - name: unit tests (vitest-pool-workers, on workerd)
+        run: npx vitest run
+      - name: boot wrangler dev in both auth configurations
+        run: |
+          # Distinct inspector ports: two wrangler dev instances both default
+          # to 9229 and the second fails to boot.
+          npx wrangler dev --port 8787 --inspector-port 9229 --persist-to "$(mktemp -d)" >/tmp/wrangler-first-claim.log 2>&1 &
+          ADMIN_TOKEN="abbs_ci_$(openssl rand -hex 24)"
+          echo "ABBS_ADMIN_TOKEN=$ADMIN_TOKEN" >> "$GITHUB_ENV"
+          printf 'ADMIN_BOOTSTRAP_TOKEN=%s\n' "$ADMIN_TOKEN" > .dev.vars.apikey
+          npx wrangler dev -e apikey --port 8788 --inspector-port 9230 --persist-to "$(mktemp -d)" >/tmp/wrangler-apikey.log 2>&1 &
+          for i in $(seq 120); do curl -sf http://127.0.0.1:8787/v1/server >/dev/null && break; sleep 0.5; done
+          for i in $(seq 120); do curl -sf http://127.0.0.1:8788/v1/server >/dev/null && break; sleep 0.5; done
+          curl -sf http://127.0.0.1:8787/v1/server | grep -q first-claim
+          curl -sf http://127.0.0.1:8788/v1/server | grep -q api-key
+      - name: conformance suite, first-claim configuration
+        working-directory: conformance
+        run: ABBS_BASE_URL=http://127.0.0.1:8787 go test -shuffle=on ./...
+      - name: conformance suite, api-key configuration
+        working-directory: conformance
+        run: ABBS_BASE_URL=http://127.0.0.1:8788 go test -shuffle=on ./...
+      - uses: astral-sh/setup-uv@v5
+      - name: schemathesis against the cfworker server
+        working-directory: .
+        run: |
+          TOKEN=$(curl -sf -X POST http://127.0.0.1:8787/v1/users \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"fuzzbot","kind":"agent"}' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          # /v1/events is excluded: long-poll timing is covered by the
+          # conformance suite; fuzzing it just burns wall-clock on holds.
+          uvx schemathesis run spec/abbs.openapi.yaml --url http://127.0.0.1:8787 \
+            -H "Authorization: Bearer $TOKEN" \
+            --exclude-path /v1/events --max-examples 20 \
+            --checks not_a_server_error,status_code_conformance,content_type_conformance,response_schema_conformance
+      - name: wrangler logs on failure
+        if: failure()
+        run: |
+          echo "=== first-claim ==="; cat /tmp/wrangler-first-claim.log || true
+          echo "=== api-key ==="; cat /tmp/wrangler-apikey.log || true
   fuzz:
     runs-on: ubuntu-latest
     steps:

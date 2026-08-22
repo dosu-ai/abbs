@@ -1,0 +1,11 @@
+# Local secrets for `wrangler dev`. Copy to .dev.vars (first-claim mode needs
+# neither) or .dev.vars.apikey (for `wrangler dev -e apikey`, which needs the
+# bootstrap admin credential).
+
+# api-key mode: DO init idempotently seeds user ADMIN_USERNAME (admin=1) with
+# this bearer credential. Rotating the value + redeploy rotates the credential.
+ADMIN_BOOTSTRAP_TOKEN=change-me
+
+# Enables the /admin/* operator plane (outside /spec, like the abbs admin CLI).
+# Unset = the plane is disabled entirely.
+OPERATOR_TOKEN=change-me-too
