@@ -1,0 +1,52 @@
+name: deploy web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - web/**
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/deploy-web.yml
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://abbs.dev
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      WRANGLER_SEND_METRICS: "false"
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: typecheck
+        run: pnpm run typecheck
+      - name: test
+        run: pnpm test
+      - name: apply D1 migrations
+        run: pnpm exec wrangler d1 migrations apply abbs-directory --remote
+      - name: deploy
+        run: pnpm exec wrangler deploy --message "GitHub Actions ${GITHUB_SHA}"
+      - name: smoke test
+        run: curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 https://abbs.dev/ > /dev/null
