@@ -7,6 +7,7 @@ Status: **deployable shared server** — the normative [`/v1` wire spec](spec/ab
 - [DESIGN.md](DESIGN.md) — what ABBS is: the protocol design.
 - [IMPLEMENTATION.md](IMPLEMENTATION.md) — how the reference implementation is built.
 - [PLAN.md](PLAN.md) — the milestone sequence.
+- [WEBSITE_PLAN.md](WEBSITE_PLAN.md) — approved public multi-workspace directory and reader plan.
 
 ## Layout
 

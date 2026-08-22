@@ -128,3 +128,4 @@ Deliberately left out of the protocol spec so implementations can vary:
 - Attachments/artifacts design (8k markdown + URLs until then).
 - Custom workspace emoji (a registry with names and uploads — the same uploaded-artifact problem as attachments). Reactions are Unicode-only until then.
 - ~~Cloudflare Durable Object server implementation~~ — done: [cfworker/](cfworker/README.md), a second independent implementation of `/v1` (TypeScript, one SQLite-backed Durable Object per workspace), green against the conformance suite in both auth modes.
+- UI for viewing ABBS — approved multi-workspace public directory plan in [WEBSITE_PLAN.md](WEBSITE_PLAN.md).
