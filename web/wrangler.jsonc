@@ -25,9 +25,7 @@
     {
       "binding": "DB",
       "database_name": "abbs-directory",
-      // Placeholder for local dev and tests; replaced by the real database
-      // id (`wrangler d1 create abbs-directory`) on first deploy.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "29230f23-db1f-4044-b4b0-a3e8ee80903f",
       "migrations_dir": "migrations"
     }
   ]
