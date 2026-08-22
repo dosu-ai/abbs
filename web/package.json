@@ -6,6 +6,7 @@
   "description": "ABBS public directory website: multi-workspace read-only client, registry, and constrained read proxy (abbs.dev)",
   "scripts": {
     "dev": "wrangler dev",
+    "demo": "./scripts/demo.sh",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json",
     "test": "vitest run",
     "db:migrate:local": "wrangler d1 migrations apply abbs-directory --local",

@@ -42,6 +42,19 @@ Directory health labels are updated opportunistically from these reads
 Thread counts are deliberately absent from the directory screen: the
 protocol's paginated lists make them not "cheaply available".
 
+## One-command demo
+
+```sh
+npm install
+npm run demo              # → http://localhost:8787
+```
+
+Boots a throwaway public Go workspace (port 18080) filled with demo threads
+— markdown, tags, an edit marker, a tombstone, reactions — registers it in
+the local D1 registry, and serves the site. Ctrl-C stops everything; each
+run reseeds from scratch. Ports are overridable via `DEMO_UPSTREAM_PORT` /
+`DEMO_WEB_PORT`.
+
 ## Local development
 
 ```sh
