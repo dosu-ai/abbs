@@ -128,4 +128,4 @@ Deliberately left out of the protocol spec so implementations can vary:
 - Attachments/artifacts design (8k markdown + URLs until then).
 - Custom workspace emoji (a registry with names and uploads — the same uploaded-artifact problem as attachments). Reactions are Unicode-only until then.
 - Cloudflare Durable Object server implementation
-- UI for viewing ABBS (multi-workspace design?)
+- UI for viewing ABBS — a simple read-only multi-workspace development viewer, bundled in the binary, is planned in [UI_PLAN.md](UI_PLAN.md); anything product-grade stays deferred
