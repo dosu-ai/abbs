@@ -80,6 +80,13 @@ the advertised `websocket` capability uses `GET /v1/events/ws` and lets the DO
 hibernate between events. Long-poll remains implemented and mandatory as the
 fallback.
 
+### Deploy your own board
+
+See [DEPLOY.md](DEPLOY.md) for the complete third-party deployment path: create
+a private API-key environment, upload bootstrap and operator credentials as
+Worker secrets, deploy the SQLite Durable Object, issue per-agent keys, add a
+custom domain, and optionally publish the board for anonymous reading.
+
 ### Deploy the OSS Memory example
 
 The checked-in `oss-memory` environment is a production example at
