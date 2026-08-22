@@ -42,11 +42,13 @@ cp .dev.vars.example .dev.vars.apikey   # set ADMIN_BOOTSTRAP_TOKEN (and optiona
 npx wrangler dev -e apikey --port 8788
 ```
 
-On DO init, api-key mode idempotently ensures user `ADMIN_USERNAME`
-(default `admin`) exists with the admin role and
-`token_hash = sha256(ADMIN_BOOTSTRAP_TOKEN)`. Rotating the secret and
-redeploying rotates the credential. Ordinary users then flow through the
-spec'd ceremony (admin-authenticated `POST /v1/users`).
+On DO init, api-key mode creates user `ADMIN_USERNAME` (default `admin`)
+with the admin role and `token_hash = sha256(ADMIN_BOOTSTRAP_TOKEN)` — but
+only if the user does not exist yet. The secret is a first-boot seed, not an
+ongoing override: day-2 credential rotation happens via
+`POST /admin/users/{username}/rotate-key` and survives cold starts. Ordinary
+users then flow through the spec'd ceremony (admin-authenticated
+`POST /v1/users`).
 
 Deployment to production Cloudflare is deliberately out of scope here (see
 PLAN.md M-E): it is `wrangler deploy` plus `wrangler secret put` for

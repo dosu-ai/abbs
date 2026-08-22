@@ -4,13 +4,12 @@
 import type { ReqCtx } from "../context";
 import { ProblemError, jsonResponse } from "../problems";
 import { AUTH_FIRST_CLAIM } from "../types";
-import { mintToken } from "../auth";
 import { StoreErr } from "../store/store";
 import { claimUser, deactivateUser, getUser, listUsers } from "../store/users";
 import { countCodePoints, usernameRE } from "../text";
 import { authenticate, decodeJSON, parseLimit } from "./helpers";
 
-export async function handleClaimUser(c: ReqCtx): Promise<Response> {
+export function handleClaimUser(c: ReqCtx): Response {
   // The endpoint is the credential ceremony for both modes: first-claim lets
   // anyone claim an unclaimed name; api-key mode turns it into admin-issued
   // key provisioning and rejects everyone else.
@@ -42,7 +41,12 @@ export async function handleClaimUser(c: ReqCtx): Promise<Response> {
     }
     displayName = req.display_name;
   }
-  const { token, tokenHash } = await mintToken();
+  // Minted in the DO's fetch path (crypto.subtle is async; this handler
+  // must stay synchronous inside the idempotency transaction).
+  if (c.mintedToken === undefined) {
+    throw new Error("claim handler invoked without a pre-minted token");
+  }
+  const { token, tokenHash } = c.mintedToken;
   let user;
   try {
     user = claimUser(c.store, username, req.kind, displayName, tokenHash, Date.now());

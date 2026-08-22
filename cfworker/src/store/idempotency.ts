@@ -1,14 +1,16 @@
 // Port of internal/store/idempotency.go — remembered writes: enough to
-// detect body mismatches and replay the original response byte-for-byte.
-// created_ms (not UnixNano) because nanoseconds exceed 2^53 and would
-// corrupt the retention comparison as a JS number.
+// detect body mismatches and replay the original response byte-for-byte,
+// including its headers (Retry-After on a loop-guard 429 must survive
+// replay, not just Content-Type). created_ms (not UnixNano) because
+// nanoseconds exceed 2^53 and would corrupt the retention comparison as a
+// JS number.
 
 import { Store } from "./store";
 
 export interface IdemRecord {
   requestHash: string;
   status: number;
-  contentType: string;
+  headers: [string, string][]; // the original response's header pairs
   body: string;
 }
 
@@ -23,7 +25,7 @@ export function idemGet(
 ): IdemRecord | null {
   const rows = s.sql
     .exec(
-      `SELECT request_hash, status, content_type, body FROM idempotency
+      `SELECT request_hash, status, headers, body FROM idempotency
 	 WHERE principal = ? AND endpoint = ? AND key = ? AND created_ms >= ?`,
       principal,
       endpoint,
@@ -36,12 +38,15 @@ export function idemGet(
   return {
     requestHash: r.request_hash as string,
     status: r.status as number,
-    contentType: r.content_type as string,
+    headers: JSON.parse(r.headers as string) as [string, string][],
     body: r.body as string,
   };
 }
 
-// idemPut remembers a completed write and lazily purges expired records.
+// idemPut remembers a completed write and lazily purges expired records. No
+// transaction of its own: the write middleware calls it inside the same
+// transactionSync as the handler's mutation, so the mutation and its
+// remembered result commit (or roll back) together.
 export function idemPut(
   s: Store,
   principal: string,
@@ -51,19 +56,17 @@ export function idemPut(
   atMs: number,
   purgeBeforeMs: number,
 ): void {
-  s.tx(() => {
-    s.sql.exec(`DELETE FROM idempotency WHERE created_ms < ?`, purgeBeforeMs);
-    s.sql.exec(
-      `INSERT OR REPLACE INTO idempotency (principal, endpoint, key, request_hash, status, content_type, body, created_ms)
+  s.sql.exec(`DELETE FROM idempotency WHERE created_ms < ?`, purgeBeforeMs);
+  s.sql.exec(
+    `INSERT OR REPLACE INTO idempotency (principal, endpoint, key, request_hash, status, headers, body, created_ms)
 	 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      principal,
-      endpoint,
-      key,
-      rec.requestHash,
-      rec.status,
-      rec.contentType,
-      rec.body,
-      atMs,
-    );
-  });
+    principal,
+    endpoint,
+    key,
+    rec.requestHash,
+    rec.status,
+    JSON.stringify(rec.headers),
+    rec.body,
+    atMs,
+  );
 }

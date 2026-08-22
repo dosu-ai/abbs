@@ -10,7 +10,7 @@ import type { ReqCtx, ServerCfg, TestHooks, Waiter } from "./context";
 import type { Env, Limits, ServerInfo } from "./types";
 import { AUTH_API_KEY, AUTH_FIRST_CLAIM, defaultLimits } from "./types";
 import { ProblemError, problemResponse } from "./problems";
-import { bearerToken, sha256Hex } from "./auth";
+import { bearerToken, mintToken, sha256Hex } from "./auth";
 import { RateLimiter } from "./ratelimit";
 import { DEFAULT_LOOP_GUARD } from "./loopguard";
 import { Router } from "./router";
@@ -91,7 +91,15 @@ export class WorkspaceDO extends DurableObject<Env> {
     super(ctx, env);
     this.store = new Store(ctx.storage, () => this.notifyWaiters());
 
-    const authMode = env.AUTH_MODE === AUTH_API_KEY ? AUTH_API_KEY : AUTH_FIRST_CLAIM;
+    // Only the exact mode strings are accepted; anything else fails init
+    // rather than silently falling back to first-claim — a typo'd production
+    // AUTH_MODE must not enable unauthenticated identity claiming (parity
+    // with the Go entrypoint, which rejects unsupported modes).
+    const rawMode = env.AUTH_MODE ?? "";
+    if (rawMode !== "" && rawMode !== AUTH_API_KEY && rawMode !== AUTH_FIRST_CLAIM) {
+      throw new Error(`unsupported AUTH_MODE "${rawMode}" (want "${AUTH_FIRST_CLAIM}" or "${AUTH_API_KEY}")`);
+    }
+    const authMode = rawMode === AUTH_API_KEY ? AUTH_API_KEY : AUTH_FIRST_CLAIM;
     this.cfg = { authMode, loopGuard: DEFAULT_LOOP_GUARD };
     this.limits = defaultLimits();
     const description = env.WORKSPACE_DESCRIPTION ?? "";
@@ -220,6 +228,10 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       const bearer = bearerToken(request);
       const tokenHash = bearer !== null ? await sha256Hex(bearer) : null;
+      // The claim handler issues a credential; mint it here so the handler
+      // itself stays synchronous (crypto.subtle is async, and write handlers
+      // run inside the idempotency transaction).
+      const mintedToken = m.entry.pattern === "POST /v1/users" ? await mintToken() : undefined;
 
       const c: ReqCtx = {
         request,
@@ -227,6 +239,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         params: m.params,
         bodyText,
         tokenHash,
+        ...(mintedToken !== undefined ? { mintedToken } : {}),
         store: this.store,
         cfg: this.cfg,
         limits: this.limits,

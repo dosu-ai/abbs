@@ -4,6 +4,8 @@
 //   - idempotency.created_ns (UnixNano) → created_ms (Date.now()): nanos
 //     exceed 2^53 and would corrupt the retention comparison as a JS number
 //   - idempotency.body BLOB → TEXT (replay stores the exact JSON string)
+//   - idempotency.content_type → headers (JSON pairs): replay must restore
+//     every original response header (e.g. Retry-After), not just the type
 //   - the mentions-column migration is folded into the base DDL (fresh
 //     implementation, no legacy databases)
 
@@ -96,7 +98,7 @@ CREATE TABLE IF NOT EXISTS idempotency (
 	key          TEXT NOT NULL,
 	request_hash TEXT NOT NULL,
 	status       INTEGER NOT NULL,
-	content_type TEXT NOT NULL,
+	headers      TEXT NOT NULL,
 	body         TEXT NOT NULL,
 	created_ms   INTEGER NOT NULL,
 	PRIMARY KEY (principal, endpoint, key)

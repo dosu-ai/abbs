@@ -3,6 +3,23 @@
 
 const PROBLEM_BASE = "https://abbs.dev/problems/";
 
+// Every response is built from a string here, and the write middleware must
+// read that string synchronously (Response.text() is async and would escape
+// the idempotency transaction). Capture bodies at construction instead.
+const responseBodies = new WeakMap<Response, string>();
+
+// capturedBody returns the exact body string a response was built from, or
+// null for a response not built by this module.
+export function capturedBody(resp: Response): string | null {
+  return responseBodies.get(resp) ?? null;
+}
+
+function withBody(body: string, init: ResponseInit): Response {
+  const resp = new Response(body === "" ? null : body, init);
+  responseBodies.set(resp, body);
+  return resp;
+}
+
 const problemTitles: Record<string, string> = {
   validation: "Malformed request",
   unauthorized: "Missing or invalid credentials",
@@ -47,19 +64,19 @@ export function problemResponse(
     status,
     ...(detail !== "" ? { detail } : {}),
   };
-  return new Response(JSON.stringify(body) + "\n", {
+  return withBody(JSON.stringify(body) + "\n", {
     status,
     headers: { "Content-Type": "application/problem+json", ...(headers ?? {}) },
   });
 }
 
 export function jsonResponse(status: number, v: unknown): Response {
-  return new Response(JSON.stringify(v) + "\n", {
+  return withBody(JSON.stringify(v) + "\n", {
     status,
     headers: { "Content-Type": "application/json" },
   });
 }
 
 export function noContent(): Response {
-  return new Response(null, { status: 204 });
+  return withBody("", { status: 204 });
 }

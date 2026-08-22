@@ -2,15 +2,16 @@
 // the same order as the Go write() wrapper: per-user rate limit, then
 // Idempotency-Key semantics (per principal, per endpoint — the endpoint is
 // the exact route-pattern string — ≥24h retention; identical replay returns
-// the original response; body mismatch is a 409; purge-on-write).
+// the original response, headers included; body mismatch is a 409;
+// purge-on-write).
 
 import type { ReqCtx } from "./context";
 import type { Handler } from "./router";
-import { problemResponse } from "./problems";
+import { capturedBody, problemResponse } from "./problems";
 import { sha256Hex } from "./auth";
 import { idemGet, idemPut } from "./store/idempotency";
 import { userByTokenHash } from "./store/users";
-import { runHandler } from "./handlers/helpers";
+import { runHandler, runHandlerSync } from "./handlers/helpers";
 import type { RateLimiter } from "./ratelimit";
 
 const RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -20,17 +21,22 @@ export interface WritePath {
   // One in-flight execution per (principal, endpoint, key): concurrent
   // retries of the same key serialize here, so the loser replays the
   // winner's response instead of double-executing. Between get and put
-  // everything is synchronous SQL, which input gates make non-interleavable
-  // anyway — the lock is kept as refactor insurance.
+  // everything is synchronous SQL inside one transaction, which input gates
+  // make non-interleavable anyway — the lock is kept as refactor insurance.
   withIdemLock<T>(key: string, f: () => Promise<T>): Promise<T>;
 }
 
 // principalFor identifies who a write is charged to: the bearer principal,
 // or — for the unauthenticated claim endpoint — the username being claimed.
-// Empty means unidentifiable (the handler's own auth will reject it).
+// Empty means unidentifiable (the handler's own auth will reject it). A
+// deactivated user is deliberately unidentifiable too: their credential must
+// not replay cached responses (which may hold issued secrets) — the handler's
+// authenticate() rejects them with the spec'd 401 instead.
 function principalFor(c: ReqCtx): string {
   if (c.tokenHash !== null) {
-    return userByTokenHash(c.store, c.tokenHash)?.username ?? "";
+    const user = userByTokenHash(c.store, c.tokenHash);
+    if (user === null || user.deactivated) return "";
+    return user.username;
   }
   if (c.request.method === "POST" && c.url.pathname === "/v1/users") {
     try {
@@ -66,43 +72,50 @@ export async function writeWrapped(w: WritePath, c: ReqCtx, endpoint: string, ha
 
   const reqHash = await sha256Hex(c.bodyText);
   const lockKey = `${principal}\x00${endpoint}\x00${key}`;
-  return w.withIdemLock(lockKey, async () => {
-    const cutoff = Date.now() - RETENTION_MS;
-    const rec = idemGet(c.store, principal, endpoint, key, cutoff);
-    if (rec !== null) {
-      if (rec.requestHash !== reqHash) {
-        return problemResponse(
-          409,
-          "idempotency-key-conflict",
-          "Idempotency-Key was already used with a different request body",
+  // Everything from the cache lookup through the handler's mutation to the
+  // idempotency record is one transactionSync: the mutation and its
+  // remembered result commit together, so a reset can never leave a
+  // committed mutation that a retry would execute a second time. Write
+  // handlers are synchronous by construction (all async work — body read,
+  // token hashing/minting — happened in the DO's fetch), so no await can
+  // escape the transaction.
+  return w.withIdemLock(lockKey, async () =>
+    c.store.tx(() => {
+      const cutoff = Date.now() - RETENTION_MS;
+      const rec = idemGet(c.store, principal, endpoint, key, cutoff);
+      if (rec !== null) {
+        if (rec.requestHash !== reqHash) {
+          return problemResponse(
+            409,
+            "idempotency-key-conflict",
+            "Idempotency-Key was already used with a different request body",
+          );
+        }
+        return new Response(rec.body === "" ? null : rec.body, {
+          status: rec.status,
+          headers: rec.headers,
+        });
+      }
+
+      const resp = runHandlerSync(handler, c);
+      if (resp.status < 500) {
+        const body = capturedBody(resp);
+        if (body === null) {
+          // Every handler builds responses via problems.ts, which captures
+          // the body string; anything else is a programming error.
+          throw new Error("write handler produced a response with no captured body");
+        }
+        idemPut(
+          c.store,
+          principal,
+          endpoint,
+          key,
+          { requestHash: reqHash, status: resp.status, headers: [...resp.headers], body },
+          Date.now(),
+          cutoff,
         );
       }
-      return replay(rec.status, rec.contentType, rec.body);
-    }
-
-    const resp = await runHandler(handler, c);
-    const status = resp.status;
-    const contentType = resp.headers.get("Content-Type") ?? "";
-    const body = await resp.text();
-    if (status < 500) {
-      idemPut(
-        c.store,
-        principal,
-        endpoint,
-        key,
-        { requestHash: reqHash, status, contentType, body },
-        Date.now(),
-        cutoff,
-      );
-    }
-    // The original response body was consumed above; rebuild it byte-for-byte.
-    const headers = new Headers(resp.headers);
-    return new Response(body === "" ? null : body, { status, headers });
-  });
-}
-
-function replay(status: number, contentType: string, body: string): Response {
-  const headers = new Headers();
-  if (contentType !== "") headers.set("Content-Type", contentType);
-  return new Response(body === "" ? null : body, { status, headers });
+      return resp;
+    }),
+  );
 }

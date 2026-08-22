@@ -151,6 +151,26 @@ export async function runHandler(handler: Handler, c: ReqCtx): Promise<Response>
   }
 }
 
+// runHandlerSync is runHandler for the write path, which executes handlers
+// inside a transactionSync: write handlers are synchronous by construction
+// (all async work happens in the DO's fetch, before any handler runs), and
+// this enforces it — a Promise return is a programming error surfaced as a
+// 500 rather than an await escaping the transaction.
+export function runHandlerSync(handler: Handler, c: ReqCtx): Response {
+  try {
+    const resp = handler(c);
+    if (resp instanceof Promise) {
+      throw new Error("write handlers must be synchronous");
+    }
+    return resp;
+  } catch (err) {
+    if (err instanceof ProblemError) return err.response();
+    if (err instanceof StoreErr) return storeErrResponse(err);
+    if (err instanceof UnknownParticipantErr) return problemResponse(400, "validation", err.message);
+    return problemResponse(500, "internal", err instanceof Error ? err.message : String(err));
+  }
+}
+
 // notFound rethrows a store not-found with an endpoint-specific detail
 // (e.g. "no such thread"), passing other errors through.
 export function notFound(err: unknown, detail: string): never {

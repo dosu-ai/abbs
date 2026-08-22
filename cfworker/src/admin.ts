@@ -3,9 +3,11 @@
 // over /v1. The Cloudflare equivalent of file access is deploy-time secrets:
 //
 // 1. Seeded bootstrap admin — api-key mode with ADMIN_BOOTSTRAP_TOKEN set
-//    idempotently ensures ADMIN_USERNAME exists with admin=1 and
-//    token_hash = sha256(secret). Rotating the secret + redeploy rotates the
-//    credential.
+//    creates ADMIN_USERNAME with admin=1 and token_hash = sha256(secret) if
+//    and only if the user does not exist yet. The secret is a first-boot
+//    seed, not an ongoing override: day-2 rotation/revocation happens via
+//    the /admin endpoints and must survive cold starts, so an existing user
+//    is never touched.
 // 2. /admin/* operator endpoints — day-2 parity with
 //    `abbs admin create-user|grant|revoke|rotate-key`. Gated by
 //    OPERATOR_TOKEN (constant-time compare), disabled entirely when the
@@ -27,9 +29,9 @@ export async function seedBootstrapAdmin(store: Store, env: Env): Promise<void> 
   const username = env.ADMIN_USERNAME || "admin";
   const tokenHash = await sha256Hex(env.ADMIN_BOOTSTRAP_TOKEN);
   store.tx(() => {
-    const rows = store.sql
-      .exec(`SELECT token_hash, admin FROM users WHERE username = ?`, username)
-      .toArray();
+    // Seed only when the user is missing: re-seeding on every cold start
+    // would silently undo /admin rotate-key and revoke on the bootstrap user.
+    const rows = store.sql.exec(`SELECT 1 FROM users WHERE username = ?`, username).toArray();
     if (rows.length === 0) {
       const ts = isoNow(Date.now());
       store.sql.exec(
@@ -40,8 +42,6 @@ export async function seedBootstrapAdmin(store: Store, env: Env): Promise<void> 
       );
       const user: User = { username, kind: "human", admin: true, deactivated: false, created_at: ts };
       insertEvent(store, "user.created", null, ts, { user });
-    } else if (rows[0].token_hash !== tokenHash || (rows[0].admin as number) !== 1) {
-      store.sql.exec(`UPDATE users SET token_hash = ?, admin = 1 WHERE username = ?`, tokenHash, username);
     }
   });
 }

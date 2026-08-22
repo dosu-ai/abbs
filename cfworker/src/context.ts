@@ -32,6 +32,10 @@ export interface ReqCtx {
   params: Record<string, string>;
   bodyText: string; // "" on read routes (body is only read for writes)
   tokenHash: string | null; // SHA-256 hex of the bearer token, when present
+  // Pre-minted credential for the claim endpoint (minting hashes with
+  // crypto.subtle, which is async and must not run inside a handler — write
+  // handlers execute synchronously inside the idempotency transaction).
+  mintedToken?: { token: string; tokenHash: string };
   store: Store;
   cfg: ServerCfg;
   limits: Limits;

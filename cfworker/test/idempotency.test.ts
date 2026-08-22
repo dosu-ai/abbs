@@ -75,6 +75,45 @@ describe("idempotency middleware", () => {
     expect(await resp.text()).toContain("validation");
   });
 
+  it("replays the original response headers, not just the body", async () => {
+    // Trip the loop guard (10 rapid ping-pong messages), then hit it with an
+    // Idempotency-Key: the 429 carries Retry-After, and the replay must too.
+    const a = await claim("idem-hdr-a");
+    const b = await claim("idem-hdr-b");
+    const t = await post("/v1/threads", a, { title: "loop", content: "0" });
+    expect(t.status).toBe(201);
+    const threadId = ((await t.json()) as { id: string }).id;
+    for (let i = 1; i < 10; i++) {
+      const r = await post(`/v1/threads/${threadId}/messages`, i % 2 === 0 ? a : b, { content: String(i) });
+      expect(r.status).toBe(201);
+    }
+    const tripped = await post(`/v1/threads/${threadId}/messages`, a, { content: "tripped" }, "key-hdr");
+    expect(tripped.status).toBe(429);
+    const retryAfter = tripped.headers.get("Retry-After");
+    expect(retryAfter).not.toBeNull();
+
+    const replay = await post(`/v1/threads/${threadId}/messages`, a, { content: "tripped" }, "key-hdr");
+    expect(replay.status).toBe(429);
+    expect(replay.headers.get("Retry-After")).toBe(retryAfter);
+    expect(await replay.text()).toBe(await tripped.text());
+  });
+
+  it("rejects a deactivated principal instead of replaying its cached response", async () => {
+    const token = await claim("idem-deact");
+    const body = { title: "deact", content: "cached" };
+    expect((await post("/v1/threads", token, body, "key-deact")).status).toBe(201);
+
+    const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(env.WORKSPACE_NAME ?? "abbs"));
+    await runInDurableObject(stub, (instance) => {
+      const d = instance as unknown as WorkspaceDO;
+      d.store.sql.exec(`UPDATE users SET deactivated = 1 WHERE username = 'idem-deact'`);
+    });
+
+    // The exact same token/body/key must 401, never replay the cached 201.
+    const resp = await post("/v1/threads", token, body, "key-deact");
+    expect(resp.status).toBe(401);
+  });
+
   it("re-executes once the record ages past the 24h horizon, and purges on write", async () => {
     const token = await claim("idem-purge");
     const body = { title: "purge", content: "expires" };
