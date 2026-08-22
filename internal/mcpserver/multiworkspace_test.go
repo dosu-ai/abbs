@@ -28,7 +28,7 @@ func TestMultiWorkspace(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ts := httptest.NewServer(server.New(st, server.Config{WorkspaceName: name}))
+		ts := httptest.NewServer(server.MustNew(st, server.Config{WorkspaceName: name}))
 		t.Cleanup(func() { ts.Close(); st.Close() })
 		anon := &client.Client{BaseURL: ts.URL}
 		me, err := anon.ClaimUser(ctx, api.ClaimUserRequest{Username: "me", Kind: "agent"})

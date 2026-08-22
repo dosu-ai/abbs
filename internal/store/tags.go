@@ -21,7 +21,7 @@ func (s *Store) UpdateThreadTags(threadID, actor string, tags []string, at time.
 	}
 	defer tx.Rollback()
 
-	t, err := getThread(tx, threadID, actor)
+	t, err := getThread(tx, threadID, AuthenticatedViewer(actor))
 	if err != nil {
 		return api.Thread{}, err
 	}
@@ -74,19 +74,25 @@ func (s *Store) UpdateThreadTags(threadID, actor string, tags []string, at time.
 // ListTags pages through tags on at least one thread visible to the viewer,
 // with usage counts, alphabetically. after is the page anchor (last tag of
 // the previous page; empty for the first).
-func (s *Store) ListTags(viewer, after string, limit int) (items []api.TagInfo, nextPage *string, asOf string, err error) {
+func (s *Store) ListTags(viewer ReadViewer, after string, limit int) (items []api.TagInfo, nextPage *string, asOf string, err error) {
 	cur, err := s.CurrentSeq()
 	if err != nil {
 		return nil, nil, "", err
 	}
 	asOf = seqToken(cur)
 
-	rows, err := s.db.Query(
-		`SELECT tt.tag, COUNT(*) FROM thread_tags tt JOIN threads t ON t.id = tt.thread_id
-		 WHERE tt.tag > ?
-		   AND (t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))
-		 GROUP BY tt.tag ORDER BY tt.tag LIMIT ?`,
-		after, viewer, limit+1)
+	query := `SELECT tt.tag, COUNT(*) FROM thread_tags tt JOIN threads t ON t.id = tt.thread_id
+		 WHERE tt.tag > ? AND `
+	args := []any{after}
+	if viewer.authenticated {
+		query += `(t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))`
+		args = append(args, viewer.username)
+	} else {
+		query += `t.kind = 'public'`
+	}
+	query += ` GROUP BY tt.tag ORDER BY tt.tag LIMIT ?`
+	args = append(args, limit+1)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, nil, "", err
 	}

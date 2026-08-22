@@ -24,7 +24,7 @@ func newServerCfg(t *testing.T, cfg Config) (*httptest.Server, *store.Store) {
 	if cfg.WorkspaceName == "" {
 		cfg.WorkspaceName = "testspace"
 	}
-	ts := httptest.NewServer(New(st, cfg))
+	ts := httptest.NewServer(MustNew(st, cfg))
 	t.Cleanup(func() { ts.Close(); st.Close() })
 	return ts, st
 }

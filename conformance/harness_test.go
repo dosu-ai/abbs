@@ -10,6 +10,7 @@
 //	                  When unset, the suite builds ../cmd/abbs and boots its own.
 //	ABBS_SPEC         path to the OpenAPI document (default ../spec/abbs.openapi.yaml).
 //	ABBS_AUTH_MODE    owned-server mode to boot: first-claim (default) or api-key.
+//	ABBS_VISIBILITY   target visibility: private (default for owned targets) or public.
 //	ABBS_ADMIN_TOKEN  admin credential for external api-key targets — the suite
 //	                  provisions its throwaway identities through it.
 //
@@ -47,6 +48,7 @@ var (
 	external   bool   // true when targeting ABBS_BASE_URL: lifecycle tests skip
 	binaryPath string // built server binary (owned mode only)
 	authMode   string // the target's mode: "first-claim" or "api-key"
+	visibility string // the target's workspace visibility: "private" or "public"
 	adminToken string // provisioning credential (api-key mode only)
 
 	specValidator  validator.Validator
@@ -97,6 +99,14 @@ func mainRun(m *testing.M) int {
 		external = true
 		adminToken = os.Getenv("ABBS_ADMIN_TOKEN")
 	} else {
+		visibility = os.Getenv("ABBS_VISIBILITY")
+		if visibility == "" {
+			visibility = "private"
+		}
+		if visibility != "private" && visibility != "public" {
+			fmt.Fprintf(os.Stderr, "conformance: ABBS_VISIBILITY must be private or public, got %q\n", visibility)
+			return 1
+		}
 		authMode = os.Getenv("ABBS_AUTH_MODE")
 		if authMode == "" {
 			authMode = "first-claim"
@@ -124,6 +134,9 @@ func mainRun(m *testing.M) int {
 	// through an admin credential under api-key.
 	info := struct {
 		AuthModes []string `json:"auth_modes"`
+		Workspace struct {
+			Visibility string `json:"visibility"`
+		} `json:"workspace"`
 	}{}
 	resp, err := http.Get(baseURL + "/v1/server")
 	if err != nil {
@@ -132,6 +145,22 @@ func mainRun(m *testing.M) int {
 	}
 	json.NewDecoder(resp.Body).Decode(&info)
 	resp.Body.Close()
+	configuredVisibility := os.Getenv("ABBS_VISIBILITY")
+	if external {
+		if configuredVisibility == "" {
+			visibility = info.Workspace.Visibility
+		} else {
+			visibility = configuredVisibility
+		}
+	}
+	if visibility != "private" && visibility != "public" {
+		fmt.Fprintf(os.Stderr, "conformance: target advertises unsupported workspace visibility %q\n", info.Workspace.Visibility)
+		return 1
+	}
+	if info.Workspace.Visibility != visibility {
+		fmt.Fprintf(os.Stderr, "conformance: target advertises visibility %q, expected %q\n", info.Workspace.Visibility, visibility)
+		return 1
+	}
 	switch {
 	case contains(info.AuthModes, "first-claim"):
 		authMode = "first-claim"
@@ -204,7 +233,11 @@ func launchServer(bin, addr, db string) (*serverProc, error) {
 		}
 		admin = strings.TrimSpace(string(out))
 	}
-	cmd := exec.Command(bin, "serve", "-addr", addr, "-db", db, "-auth", authMode)
+	args := []string{"serve", "-addr", addr, "-db", db, "-auth", authMode, "-visibility", visibility}
+	if visibility == "public" {
+		args = append(args, "-canonical-url", "https://conformance.example", "-description", "Conformance workspace")
+	}
+	cmd := exec.Command(bin, args...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {

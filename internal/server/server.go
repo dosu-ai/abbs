@@ -14,7 +14,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,14 +33,19 @@ var usernameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
 // Auth modes selectable at serve time. The seam selects exactly one mode;
 // all modes converge on "bearer token → principal" (DESIGN.md).
 const (
-	AuthFirstClaim = "first-claim" // anyone may claim an unclaimed name
-	AuthAPIKey     = "api-key"     // admin-issued static keys; claiming is off
+	AuthFirstClaim    = "first-claim" // anyone may claim an unclaimed name
+	AuthAPIKey        = "api-key"     // admin-issued static keys; claiming is off
+	VisibilityPrivate = "private"
+	VisibilityPublic  = "public"
 )
 
 // Config tunes a server instance. Zero values take documented defaults.
 type Config struct {
-	WorkspaceName        string
-	WorkspaceDescription string
+	WorkspaceName             string
+	WorkspaceDescription      string
+	WorkspaceVisibility       string
+	WorkspaceCanonicalURL     string
+	WorkspaceDirectoryListing bool
 
 	// AuthMode selects the credential ceremony: AuthFirstClaim (default)
 	// or AuthAPIKey.
@@ -48,6 +55,11 @@ type Config struct {
 	WriteBurst        int     // default 60
 	WriteRefillPerSec float64 // default 1
 
+	// Anonymous GET rate limit. These are test seams; operators use the
+	// protocol defaults so public workspaces have one consistent budget.
+	AnonymousBurst        int     // default 60
+	AnonymousRefillPerSec float64 // default 1
+
 	// Reply-loop guard: posting is rejected when the thread's last
 	// LoopGuardMessages messages plus this one are authored by ≤2 distinct
 	// users within LoopGuardWindow — the two-agents-ping-ponging shape.
@@ -55,9 +67,12 @@ type Config struct {
 	LoopGuardWindow   time.Duration // default 2m
 }
 
-func (c Config) withDefaults() Config {
+func (c Config) withDefaults() (Config, error) {
 	if c.WorkspaceName == "" {
 		c.WorkspaceName = "abbs"
+	}
+	if c.WorkspaceVisibility == "" {
+		c.WorkspaceVisibility = VisibilityPrivate
 	}
 	if c.AuthMode == "" {
 		c.AuthMode = AuthFirstClaim
@@ -68,35 +83,102 @@ func (c Config) withDefaults() Config {
 	if c.WriteRefillPerSec == 0 {
 		c.WriteRefillPerSec = 1
 	}
+	if c.AnonymousBurst == 0 {
+		c.AnonymousBurst = 60
+	}
+	if c.AnonymousRefillPerSec == 0 {
+		c.AnonymousRefillPerSec = 1
+	}
 	if c.LoopGuardMessages == 0 {
 		c.LoopGuardMessages = 10
 	}
 	if c.LoopGuardWindow == 0 {
 		c.LoopGuardWindow = 2 * time.Minute
 	}
-	return c
+	if n := utf8.RuneCountInString(c.WorkspaceName); n < 1 || n > 100 {
+		return Config{}, fmt.Errorf("workspace name must be 1..100 Unicode code points")
+	}
+	if utf8.RuneCountInString(c.WorkspaceDescription) > 1000 {
+		return Config{}, fmt.Errorf("workspace description must be at most 1000 Unicode code points")
+	}
+	if c.WorkspaceVisibility != VisibilityPrivate && c.WorkspaceVisibility != VisibilityPublic {
+		return Config{}, fmt.Errorf("workspace visibility must be %q or %q", VisibilityPrivate, VisibilityPublic)
+	}
+	if c.AuthMode != AuthFirstClaim && c.AuthMode != AuthAPIKey {
+		return Config{}, fmt.Errorf("auth mode must be %q or %q", AuthFirstClaim, AuthAPIKey)
+	}
+	if c.WorkspaceCanonicalURL != "" {
+		if err := validateCanonicalOrigin(c.WorkspaceCanonicalURL); err != nil {
+			return Config{}, fmt.Errorf("workspace canonical URL: %w", err)
+		}
+	}
+	if c.WorkspaceVisibility == VisibilityPublic && c.WorkspaceCanonicalURL == "" {
+		return Config{}, errors.New("public workspace requires a canonical URL")
+	}
+	if c.WorkspaceDirectoryListing {
+		if c.WorkspaceVisibility != VisibilityPublic {
+			return Config{}, errors.New("directory listing requires public workspace visibility")
+		}
+		if c.WorkspaceDescription == "" {
+			return Config{}, errors.New("directory listing requires a non-empty workspace description")
+		}
+	}
+	if c.WriteBurst < 1 || c.WriteRefillPerSec <= 0 || c.AnonymousBurst < 1 || c.AnonymousRefillPerSec <= 0 {
+		return Config{}, errors.New("rate-limit burst and refill values must be positive")
+	}
+	return c, nil
+}
+
+func validateCanonicalOrigin(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.New("must be a valid HTTPS origin")
+	}
+	if u.Scheme != "https" || u.Host == "" || u.Hostname() == "" || u.User != nil ||
+		u.Opaque != "" || (u.Path != "" && u.Path != "/") || u.RawPath != "" ||
+		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return errors.New("must be an HTTPS origin with no credentials, path, query, or fragment")
+	}
+	return nil
 }
 
 type Server struct {
-	store     *store.Store
-	cfg       Config
-	info      api.ServerInfo
-	limits    api.Limits
-	limiter   *limiter
-	idemLocks sync.Map // (principal, endpoint, key) -> *sync.Mutex
+	store            *store.Store
+	cfg              Config
+	info             api.ServerInfo
+	limits           api.Limits
+	limiter          *limiter
+	anonymousLimiter *limiter
+	idemLocks        sync.Map // (principal, endpoint, key) -> *sync.Mutex
 }
 
-func New(st *store.Store, cfg Config) http.Handler {
-	cfg = cfg.withDefaults()
+func New(st *store.Store, cfg Config) (http.Handler, error) {
+	var err error
+	cfg, err = cfg.withDefaults()
+	if err != nil {
+		return nil, err
+	}
 	limits := api.DefaultLimits()
+	var description, canonicalURL *string
+	if cfg.WorkspaceDescription != "" {
+		description = &cfg.WorkspaceDescription
+	}
+	if cfg.WorkspaceCanonicalURL != "" {
+		canonicalURL = &cfg.WorkspaceCanonicalURL
+	}
 	s := &Server{
-		store:   st,
-		cfg:     cfg,
-		limits:  limits,
-		limiter: newLimiter(cfg.WriteBurst, cfg.WriteRefillPerSec),
+		store:            st,
+		cfg:              cfg,
+		limits:           limits,
+		limiter:          newLimiter(cfg.WriteBurst, cfg.WriteRefillPerSec),
+		anonymousLimiter: newLimiter(cfg.AnonymousBurst, cfg.AnonymousRefillPerSec),
 		info: api.ServerInfo{
-			APIVersion:   "v1",
-			Workspace:    api.Workspace{Name: cfg.WorkspaceName, Description: cfg.WorkspaceDescription},
+			APIVersion: "v1",
+			Workspace: api.Workspace{
+				Name: cfg.WorkspaceName, Description: description,
+				Visibility: cfg.WorkspaceVisibility, CanonicalURL: canonicalURL,
+				DirectoryListing: cfg.WorkspaceDirectoryListing,
+			},
 			AuthModes:    []string{cfg.AuthMode},
 			Capabilities: []string{"websocket"},
 			Limits:       limits,
@@ -139,7 +221,18 @@ func New(st *store.Store, cfg Config) http.Handler {
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		mux.ServeHTTP(w, r)
-	})
+	}), nil
+}
+
+// MustNew is a convenience for tests and embedded fixtures whose static
+// configuration is part of the source. Operator-controlled configuration
+// must use New and surface its error before serving.
+func MustNew(st *store.Store, cfg Config) http.Handler {
+	h, err := New(st, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return h
 }
 
 // NewToken mints an opaque bearer token and its storage hash. Tokens are
@@ -189,6 +282,48 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (api.User,
 	return user, true
 }
 
+// conditionalReadViewer implements the public-workspace auth resolution for
+// the five anonymous-capable reads. A supplied Authorization header is always
+// authenticated (and rejected when malformed/unknown/deactivated); only a
+// genuinely missing header may become an anonymous public viewer.
+func (s *Server) conditionalReadViewer(w http.ResponseWriter, r *http.Request) (store.ReadViewer, *api.User, bool) {
+	if len(r.Header.Values("Authorization")) > 0 {
+		user, ok := s.authenticate(w, r)
+		if !ok {
+			return store.ReadViewer{}, nil, false
+		}
+		return store.AuthenticatedViewer(user.Username), &user, true
+	}
+	if s.cfg.WorkspaceVisibility != VisibilityPublic {
+		writeProblem(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
+		return store.ReadViewer{}, nil, false
+	}
+	if !s.allowAnonymous(w, r) {
+		return store.ReadViewer{}, nil, false
+	}
+	return store.AnonymousViewer(), nil, true
+}
+
+func (s *Server) allowAnonymous(w http.ResponseWriter, r *http.Request) bool {
+	if ok, retryAfter := s.anonymousLimiter.allow(anonymousClientKey(r), time.Now()); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+		writeProblem(w, http.StatusTooManyRequests, "rate-limited", "anonymous read rate limit")
+		return false
+	}
+	return true
+}
+
+func anonymousClientKey(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && host != "" {
+		return host
+	}
+	if net.ParseIP(r.RemoteAddr) != nil {
+		return r.RemoteAddr
+	}
+	return "anonymous:fallback"
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		writeProblem(w, http.StatusBadRequest, "validation", "invalid JSON body: "+err.Error())
@@ -198,6 +333,9 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
+	if !s.allowAnonymous(w, r) {
+		return
+	}
 	writeJSON(w, http.StatusOK, s.info)
 }
 
@@ -344,11 +482,11 @@ func (s *Server) checkContent(w http.ResponseWriter, content string) bool {
 }
 
 func (s *Server) handleGetThread(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authenticate(w, r)
+	viewer, _, ok := s.conditionalReadViewer(w, r)
 	if !ok {
 		return
 	}
-	thread, err := s.store.GetThread(r.PathValue("thread_id"), user.Username)
+	thread, err := s.store.GetThread(r.PathValue("thread_id"), viewer)
 	if errors.Is(err, store.ErrNotFound) {
 		writeProblem(w, http.StatusNotFound, "not-found", "no such thread")
 		return
@@ -412,7 +550,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authenticate(w, r)
+	viewer, _, ok := s.conditionalReadViewer(w, r)
 	if !ok {
 		return
 	}
@@ -424,7 +562,7 @@ func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, nextPage, asOf, err := s.store.ListMessages(r.PathValue("thread_id"), user.Username, after, limit)
+	items, nextPage, asOf, err := s.store.ListMessages(r.PathValue("thread_id"), viewer, after, limit)
 	if errors.Is(err, store.ErrNotFound) {
 		writeProblem(w, http.StatusNotFound, "not-found", "no such thread")
 		return
@@ -464,7 +602,7 @@ func parsePageAnchor(w http.ResponseWriter, r *http.Request) (int64, bool) {
 }
 
 func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authenticate(w, r)
+	viewer, _, ok := s.conditionalReadViewer(w, r)
 	if !ok {
 		return
 	}
@@ -487,7 +625,7 @@ func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tags := normalizeTags(q["tag"])
-	items, nextPage, asOf, err := s.store.ListThreads(user.Username, since, before, tags, limit)
+	items, nextPage, asOf, err := s.store.ListThreads(viewer, since, before, tags, limit)
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "internal", err.Error())
 		return

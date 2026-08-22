@@ -10,13 +10,14 @@
 
 import type { Env } from "./types";
 import { WorkspaceDO } from "./workspace-do";
+import { parseWorkspaceConfig } from "./config";
 
 export { WorkspaceDO };
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const name = env.WORKSPACE_NAME || "abbs";
-    const id = env.WORKSPACE.idFromName(name);
+    const cfg = parseWorkspaceConfig(env);
+    const id = env.WORKSPACE.idFromName(cfg.name);
     return env.WORKSPACE.get(id).fetch(request);
   },
 } satisfies ExportedHandler<Env>;

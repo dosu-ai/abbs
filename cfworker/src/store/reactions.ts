@@ -3,7 +3,18 @@
 // deliberately never touch the thread's activity cursor (DESIGN.md).
 
 import type { Reaction } from "../types";
-import { MESSAGE_COLS, Store, StoreErr, currentSeq, getThread, insertEvent, isoNow, rowToMessage, seqToken } from "./store";
+import {
+  MESSAGE_COLS,
+  Store,
+  StoreErr,
+  authenticatedViewer,
+  currentSeq,
+  getThread,
+  insertEvent,
+  isoNow,
+  rowToMessage,
+  seqToken,
+} from "./store";
 
 function scanMessageRow(s: Store, messageId: string) {
   const rows = s.sql.exec(`SELECT ${MESSAGE_COLS} FROM messages WHERE id = ?`, messageId).toArray();
@@ -19,7 +30,7 @@ export function addReaction(s: Store, messageId: string, viewer: string, emojiKe
   let emitted = false;
   s.tx(() => {
     const m = scanMessageRow(s, messageId);
-    getThread(s, m.thread_id, viewer);
+    getThread(s, m.thread_id, authenticatedViewer(viewer));
     if (m.deleted) throw new StoreErr("message-deleted");
 
     const existing = s.sql
@@ -59,7 +70,7 @@ export function removeReaction(s: Store, messageId: string, viewer: string, emoj
   let emitted = false;
   s.tx(() => {
     const m = scanMessageRow(s, messageId);
-    getThread(s, m.thread_id, viewer);
+    getThread(s, m.thread_id, authenticatedViewer(viewer));
 
     const res = s.sql.exec(
       `DELETE FROM reactions WHERE message_id = ? AND username = ? AND emoji = ?`,
@@ -89,7 +100,7 @@ export function listReactions(
   limit: number,
 ): { items: Reaction[]; nextPage: string | null; asOf: string } {
   const m = scanMessageRow(s, messageId);
-  getThread(s, m.thread_id, viewer);
+  getThread(s, m.thread_id, authenticatedViewer(viewer));
   const asOf = seqToken(currentSeq(s));
 
   const rows = s.sql

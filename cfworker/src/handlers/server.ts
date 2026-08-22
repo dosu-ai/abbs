@@ -5,5 +5,6 @@ import type { ReqCtx } from "../context";
 import { jsonResponse } from "../problems";
 
 export function handleGetServer(c: ReqCtx): Response {
+  c.allowAnonymous();
   return jsonResponse(200, c.info);
 }

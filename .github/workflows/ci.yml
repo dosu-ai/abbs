@@ -23,15 +23,21 @@ jobs:
         run: go test -race -shuffle=on ./...
   conformance:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        auth: [first-claim, api-key]
+        visibility: [private, public]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: black-box conformance suite (boots its own server; includes kill -9 lifecycle)
-        run: cd conformance && go vet ./... && go test -shuffle=on ./...
-      - name: conformance suite, api-key configuration (the M6 shared-server mode)
-        run: cd conformance && ABBS_AUTH_MODE=api-key go test -shuffle=on ./...
+      - name: black-box conformance suite (${{ matrix.auth }}, ${{ matrix.visibility }})
+        env:
+          ABBS_AUTH_MODE: ${{ matrix.auth }}
+          ABBS_VISIBILITY: ${{ matrix.visibility }}
+        run: cd conformance && go vet ./... && go test -count=1 -shuffle=on ./...
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -64,25 +70,38 @@ jobs:
         run: npx tsc --noEmit
       - name: unit tests (vitest-pool-workers, on workerd)
         run: npx vitest run
-      - name: boot wrangler dev in both auth configurations
+      - name: boot wrangler dev in all auth and visibility configurations
         run: |
-          # Distinct inspector ports: two wrangler dev instances both default
-          # to 9229 and the second fails to boot.
+          # Distinct inspector ports: parallel wrangler dev instances cannot
+          # share the default 9229 port.
           npx wrangler dev --port 8787 --inspector-port 9229 --persist-to "$(mktemp -d)" >/tmp/wrangler-first-claim.log 2>&1 &
           ADMIN_TOKEN="abbs_ci_$(openssl rand -hex 24)"
           echo "ABBS_ADMIN_TOKEN=$ADMIN_TOKEN" >> "$GITHUB_ENV"
           printf 'ADMIN_BOOTSTRAP_TOKEN=%s\n' "$ADMIN_TOKEN" > .dev.vars.apikey
+          printf 'ADMIN_BOOTSTRAP_TOKEN=%s\n' "$ADMIN_TOKEN" > .dev.vars.public-apikey
           npx wrangler dev -e apikey --port 8788 --inspector-port 9230 --persist-to "$(mktemp -d)" >/tmp/wrangler-apikey.log 2>&1 &
+          npx wrangler dev -e public --port 8789 --inspector-port 9231 --persist-to "$(mktemp -d)" >/tmp/wrangler-public.log 2>&1 &
+          npx wrangler dev -e public-apikey --port 8790 --inspector-port 9232 --persist-to "$(mktemp -d)" >/tmp/wrangler-public-apikey.log 2>&1 &
           for i in $(seq 120); do curl -sf http://127.0.0.1:8787/v1/server >/dev/null && break; sleep 0.5; done
           for i in $(seq 120); do curl -sf http://127.0.0.1:8788/v1/server >/dev/null && break; sleep 0.5; done
+          for i in $(seq 120); do curl -sf http://127.0.0.1:8789/v1/server >/dev/null && break; sleep 0.5; done
+          for i in $(seq 120); do curl -sf http://127.0.0.1:8790/v1/server >/dev/null && break; sleep 0.5; done
           curl -sf http://127.0.0.1:8787/v1/server | grep -q first-claim
           curl -sf http://127.0.0.1:8788/v1/server | grep -q api-key
+          curl -sf http://127.0.0.1:8789/v1/server | grep -q '"visibility":"public"'
+          curl -sf http://127.0.0.1:8790/v1/server | grep -q '"visibility":"public"'
       - name: conformance suite, first-claim configuration
         working-directory: conformance
-        run: ABBS_BASE_URL=http://127.0.0.1:8787 go test -shuffle=on ./...
+        run: ABBS_BASE_URL=http://127.0.0.1:8787 go test -count=1 -shuffle=on ./...
       - name: conformance suite, api-key configuration
         working-directory: conformance
-        run: ABBS_BASE_URL=http://127.0.0.1:8788 go test -shuffle=on ./...
+        run: ABBS_BASE_URL=http://127.0.0.1:8788 go test -count=1 -shuffle=on ./...
+      - name: conformance suite, public first-claim configuration
+        working-directory: conformance
+        run: ABBS_BASE_URL=http://127.0.0.1:8789 ABBS_VISIBILITY=public go test -count=1 -shuffle=on ./...
+      - name: conformance suite, public api-key configuration
+        working-directory: conformance
+        run: ABBS_BASE_URL=http://127.0.0.1:8790 ABBS_VISIBILITY=public ABBS_ADMIN_TOKEN="$ABBS_ADMIN_TOKEN" go test -count=1 -shuffle=on ./...
       - uses: astral-sh/setup-uv@v5
       - name: schemathesis against the cfworker server
         working-directory: .
@@ -103,6 +122,8 @@ jobs:
         run: |
           echo "=== first-claim ==="; cat /tmp/wrangler-first-claim.log || true
           echo "=== api-key ==="; cat /tmp/wrangler-apikey.log || true
+          echo "=== public first-claim ==="; cat /tmp/wrangler-public.log || true
+          echo "=== public api-key ==="; cat /tmp/wrangler-public-apikey.log || true
   fuzz:
     runs-on: ubuntu-latest
     steps:

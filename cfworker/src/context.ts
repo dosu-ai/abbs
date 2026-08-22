@@ -9,6 +9,7 @@ import type { LoopGuardConfig } from "./loopguard";
 
 export interface ServerCfg {
   authMode: string;
+  visibility: "private" | "public";
   loopGuard: LoopGuardConfig;
 }
 
@@ -43,5 +44,7 @@ export interface ReqCtx {
   // waitForEvent subscribes to the DO's waiter set — must be called before
   // querying so an append between query and park still wakes the poll.
   waitForEvent: () => Waiter;
+  // Consumes the per-client anonymous GET budget or throws a 429 problem.
+  allowAnonymous: () => void;
   hooks?: TestHooks;
 }

@@ -2,7 +2,18 @@
 // listing, and per-user tag subscriptions.
 
 import type { TagInfo, Thread } from "../types";
-import { Store, StoreErr, advanceReadCursor, currentSeq, getThread, insertEvent, isoNow, seqToken } from "./store";
+import {
+  Store,
+  StoreErr,
+  advanceReadCursor,
+  authenticatedViewer,
+  currentSeq,
+  getThread,
+  insertEvent,
+  isoNow,
+  type ReadViewer,
+  seqToken,
+} from "./store";
 
 // updateThreadTags replaces a thread's tag set. Permitted for the creator
 // and participants — in a DM, the fixed participant set (visibility already
@@ -11,7 +22,7 @@ import { Store, StoreErr, advanceReadCursor, currentSeq, getThread, insertEvent,
 // must already be normalized.
 export function updateThreadTags(s: Store, threadId: string, actor: string, tags: string[], atMs: number): Thread {
   const thread = s.tx(() => {
-    const t = getThread(s, threadId, actor);
+    const t = getThread(s, threadId, authenticatedViewer(actor));
     if (t.kind === "public" && t.creator !== actor) {
       const posted = s.sql
         .exec(`SELECT 1 FROM messages WHERE thread_id = ? AND author = ? LIMIT 1`, threadId, actor)
@@ -45,21 +56,24 @@ export function updateThreadTags(s: Store, threadId: string, actor: string, tags
 // the previous page; empty for the first).
 export function listTags(
   s: Store,
-  viewer: string,
+  viewer: ReadViewer,
   after: string,
   limit: number,
 ): { items: TagInfo[]; nextPage: string | null; asOf: string } {
   const asOf = seqToken(currentSeq(s));
+  let query = `SELECT tt.tag, COUNT(*) AS n FROM thread_tags tt JOIN threads t ON t.id = tt.thread_id
+	 WHERE tt.tag > ? AND `;
+  const args: unknown[] = [after];
+  if (viewer.kind === "authenticated") {
+    query += `(t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))`;
+    args.push(viewer.username);
+  } else {
+    query += `t.kind = 'public'`;
+  }
+  query += ` GROUP BY tt.tag ORDER BY tt.tag LIMIT ?`;
+  args.push(limit + 1);
   let items = s.sql
-    .exec(
-      `SELECT tt.tag, COUNT(*) AS n FROM thread_tags tt JOIN threads t ON t.id = tt.thread_id
-	 WHERE tt.tag > ?
-	   AND (t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))
-	 GROUP BY tt.tag ORDER BY tt.tag LIMIT ?`,
-      after,
-      viewer,
-      limit + 1,
-    )
+    .exec(query, ...args)
     .toArray()
     .map((r): TagInfo => ({ name: r.tag as string, thread_count: r.n as number }));
   let nextPage: string | null = null;

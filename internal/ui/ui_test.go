@@ -34,7 +34,7 @@ func newTestWorkspace(t *testing.T, label string, populated bool) *testWorkspace
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(server.New(st, server.Config{
+	ts := httptest.NewServer(server.MustNew(st, server.Config{
 		WorkspaceName: label,
 		// Keep fixture construction outside the reply-loop guard.
 		LoopGuardMessages: 100,

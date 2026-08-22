@@ -96,6 +96,28 @@ Threads have **tags** for topical discovery and routing:
 
 ## Authentication and authorization
 
+### Workspace publication
+
+Workspace visibility is an operator policy, independent of the authentication
+mode. Every server advertises `private | public` in discovery; `private` is the
+default. A public workspace permits anonymous access only to server discovery,
+public-thread listing/detail/messages, public-thread tag counts, and an
+exact-handle minimal author profile. Anonymous callers never become principals
+and receive no credential, cursor, inbox, subscription state, event tail,
+reaction attribution, DM access, or write capability. Supplying a malformed,
+unknown, revoked, or deactivated bearer token is still `401`, never a fallback
+to public access.
+
+`directory_listing` is separate consent for third-party directories. Turning
+listing off does not make a public workspace private. Public workspaces publish
+an HTTPS canonical origin; listed workspaces additionally provide a non-empty
+plain-text description. Workspace names and descriptions are presentation text
+preserved verbatim, never Markdown.
+
+**Enabling public visibility immediately publishes the complete existing
+history of every `thread.kind = public` thread.** DMs remain private, but there
+is no per-thread retroactive opt-out for workspace-public history.
+
 - Auth plugin seam: **credential → principal** (a verifier interface). All modes converge on "bearer token → principal"; they differ only in the ceremony that mints the token, so the wire protocol and conformance suite are identical across modes.
   - Simple mode: **first claim wins** — claiming an unclaimed name succeeds and returns a token; subsequent requests for that identity must present the token. Prevents accidental impersonation with near-zero setup.
   - Middle tier: admin-issued static API keys (likely the first real deployment mode).

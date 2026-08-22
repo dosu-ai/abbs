@@ -15,13 +15,25 @@ func TestDiscovery(t *testing.T) {
 	var info struct {
 		APIVersion string `json:"api_version"`
 		Workspace  struct {
-			Name string `json:"name"`
+			Name             string  `json:"name"`
+			Visibility       string  `json:"visibility"`
+			CanonicalURL     *string `json:"canonical_url"`
+			DirectoryListing bool    `json:"directory_listing"`
 		}
 		Limits map[string]int `json:"limits"`
 	}
 	c.do("GET", "/v1/server", nil, nil).expect(t, http.StatusOK).decode(t, &info)
 	if info.APIVersion != "v1" || info.Workspace.Name == "" {
 		t.Fatalf("discovery: %+v", info)
+	}
+	if info.Workspace.Visibility != visibility {
+		t.Fatalf("visibility = %q, want %q", info.Workspace.Visibility, visibility)
+	}
+	if visibility == "public" && info.Workspace.CanonicalURL == nil {
+		t.Fatal("public discovery omitted canonical_url")
+	}
+	if info.Workspace.DirectoryListing && visibility != "public" {
+		t.Fatal("private workspace advertised directory_listing")
 	}
 	for _, key := range []string{"message_max_chars", "reactions_max_per_user_per_message", "idempotency_retention_hours"} {
 		if info.Limits[key] <= 0 {

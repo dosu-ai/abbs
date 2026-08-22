@@ -52,7 +52,7 @@ func (s *Store) GetMessage(id, viewer string) (api.Message, error) {
 	if err != nil {
 		return api.Message{}, err
 	}
-	if _, err := getThread(s.db, m.ThreadID, viewer); err != nil {
+	if _, err := getThread(s.db, m.ThreadID, AuthenticatedViewer(viewer)); err != nil {
 		return api.Message{}, err
 	}
 	if m.Reactions, err = tallies(s.db, m.ID); err != nil {
@@ -78,7 +78,7 @@ func (s *Store) EditMessage(id, author, content string, at time.Time) (api.Messa
 	if err != nil {
 		return api.Message{}, err
 	}
-	if _, err := getThread(tx, m.ThreadID, author); err != nil {
+	if _, err := getThread(tx, m.ThreadID, AuthenticatedViewer(author)); err != nil {
 		return api.Message{}, err
 	}
 	if m.Deleted {
@@ -155,7 +155,7 @@ func (s *Store) DeleteMessage(id, actor string, isAdmin bool, at time.Time) (api
 		return api.Message{}, err
 	}
 	if !isAdmin {
-		if _, err := getThread(tx, m.ThreadID, actor); err != nil {
+		if _, err := getThread(tx, m.ThreadID, AuthenticatedViewer(actor)); err != nil {
 			return api.Message{}, err
 		}
 		if m.Author != actor {

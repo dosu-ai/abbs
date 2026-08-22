@@ -27,7 +27,7 @@ func (s *Store) AddReaction(messageID, viewer, emojiKey string, at time.Time) er
 	if err != nil {
 		return err
 	}
-	if _, err := getThread(tx, m.ThreadID, viewer); err != nil {
+	if _, err := getThread(tx, m.ThreadID, AuthenticatedViewer(viewer)); err != nil {
 		return err
 	}
 	if m.Deleted {
@@ -86,7 +86,7 @@ func (s *Store) RemoveReaction(messageID, viewer, emojiKey string, at time.Time)
 	if err != nil {
 		return err
 	}
-	if _, err := getThread(tx, m.ThreadID, viewer); err != nil {
+	if _, err := getThread(tx, m.ThreadID, AuthenticatedViewer(viewer)); err != nil {
 		return err
 	}
 
