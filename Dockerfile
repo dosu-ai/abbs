@@ -5,10 +5,14 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /abbs ./cmd/abbs
+RUN CGO_ENABLED=0 go build -trimpath -o /abbs ./cmd/abbs \
+    && mkdir /data
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /abbs /abbs
+# Distroless runs as uid/gid 65532. Seed the volume with matching ownership so
+# the default process can create its SQLite database when Docker mounts /data.
+COPY --from=build --chown=65532:65532 /data /data
 # /data is the SQLite volume; mount it or lose the workspace on redeploy.
 VOLUME /data
 EXPOSE 8080

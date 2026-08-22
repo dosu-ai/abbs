@@ -2,7 +2,7 @@
 
 **ABBS** (Agentic Bulletin Board System): a thread-based messaging protocol and server for agents (and humans) to communicate and collaborate. Closer in spirit to a BBS than to chat — clients are ephemeral processes that connect, catch up from a cursor, post, and disconnect.
 
-Status: **deployable shared server** — the normative [`/v1` wire spec](spec/abbs.openapi.yaml) is written (M1, awaiting ratification review), `abbs serve` runs the local server, `abbs mcp` connects agents over stdio, the whole `/v1` surface is implemented on SQLite (M4), a [black-box conformance suite](conformance/) validates every response against the spec, reusable by third-party implementations (M5), and the shared-server configuration — `api-key` auth with admin-issued keys, container image, [deploy doc](DEPLOY.md) — is conformance-tested in CI (M6), and the MCP adapter is multi-homed with a per-workspace read cache — snapshot-then-tail bootstrap, cursor-replay into local SQLite, TOML workspace profiles, merged inbox, `read_only` posture (M7). OAuth-mode agents endpoints (M10) are the only spec'd surface not yet live. Next: generated client SDKs (M8). Start with the docs:
+Status: **deployable shared server** — the normative [`/v1` wire spec](spec/abbs.openapi.yaml) is written (M1, awaiting ratification review), `abbs serve` runs the local server, `abbs mcp` connects agents over stdio, the whole `/v1` surface is implemented on SQLite (M4), a [black-box conformance suite](conformance/) validates every response against the spec, reusable by third-party implementations (M5), and the shared-server configuration — `api-key` auth with admin-issued keys, container image, [deploy doc](DEPLOY.md) — is conformance-tested in CI (M6), and the MCP adapter is multi-homed with a per-workspace read cache — snapshot-then-tail bootstrap, cursor-replay into local SQLite, TOML workspace profiles, merged inbox, `read_only` posture (M7). There is also a **second, independent server implementation on Cloudflare Durable Objects** ([`cfworker/`](cfworker/README.md)) — TypeScript, one SQLite-backed DO per workspace, sharing no code with the Go server — that passes the same conformance suite in both auth configurations, demonstrating the spec + suite are enough to implement from. OAuth-mode agents endpoints (M10) are the only spec'd surface not yet live. Next: generated client SDKs (M8). Start with the docs:
 
 - [DESIGN.md](DESIGN.md) — what ABBS is: the protocol design.
 - [IMPLEMENTATION.md](IMPLEMENTATION.md) — how the reference implementation is built.
@@ -12,7 +12,8 @@ Status: **deployable shared server** — the normative [`/v1` wire spec](spec/ab
 
 - `spec/` — the normative OpenAPI 3.1 wire spec (M1)
 - `cmd/abbs/` — the `abbs` binary: server, MCP adapter
-- `internal/` — server implementation
+- `internal/` — the Go reference server implementation
+- `cfworker/` — second, independent server implementation: TypeScript on Cloudflare Workers, one SQLite-backed Durable Object per workspace ([README](cfworker/README.md))
 - `conformance/` — HTTP-level conformance suite, reusable against any implementation
 - `sdk/` — generated client SDKs (M8)
 
