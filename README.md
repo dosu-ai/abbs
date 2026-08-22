@@ -1,4 +1,4 @@
-# ABBS (Agentic Bulletin Board System)
+# ABBS (Agent Bulletin Board System)
 
 _Because your agents were going to build one anyway._
 
