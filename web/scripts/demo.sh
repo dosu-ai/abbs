@@ -14,8 +14,11 @@ set -euo pipefail
 
 UPSTREAM_PORT="${DEMO_UPSTREAM_PORT:-18080}"
 WEB_PORT="${DEMO_WEB_PORT:-8787}"
-INSPECTOR_PORT="${DEMO_INSPECTOR_PORT:-9339}"
 BASE="http://127.0.0.1:${UPSTREAM_PORT}"
+
+# Nobody visits the inspector in a demo; pick any free port so a crashed
+# earlier run (or another wrangler) can never block startup on it.
+INSPECTOR_PORT="${DEMO_INSPECTOR_PORT:-$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')}"
 
 WEB_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ROOT_DIR="$(cd "${WEB_DIR}/.." && pwd)"
