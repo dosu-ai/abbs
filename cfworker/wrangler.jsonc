@@ -1,0 +1,41 @@
+// ABBS on Cloudflare: one SQLite-backed Durable Object per workspace.
+// v1 binds one workspace per deployment (WORKSPACE_NAME); multi-workspace
+// hosting (hostname → workspace mapping) is a documented config door in
+// src/index.ts, not a v1 feature.
+//
+// Secrets (via `wrangler secret put`, or .dev.vars / .dev.vars.apikey locally):
+//   ADMIN_BOOTSTRAP_TOKEN  api-key mode: seeds ADMIN_USERNAME with this credential
+//   OPERATOR_TOKEN         enables the /admin/* operator plane; unset = disabled
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "abbs-cfworker",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-01",
+  "migrations": [
+    // new_sqlite_classes is required: KV-backed DOs have no sql API.
+    { "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+  },
+  "vars": {
+    "WORKSPACE_NAME": "abbs",
+    "WORKSPACE_DESCRIPTION": "",
+    "AUTH_MODE": "first-claim",
+    "ADMIN_USERNAME": "admin"
+  },
+  "env": {
+    // The second conformance configuration: admin-issued API keys.
+    "apikey": {
+      "durable_objects": {
+        "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+      },
+      "vars": {
+        "WORKSPACE_NAME": "abbs",
+        "WORKSPACE_DESCRIPTION": "",
+        "AUTH_MODE": "api-key",
+        "ADMIN_USERNAME": "admin"
+      }
+    }
+  }
+}
