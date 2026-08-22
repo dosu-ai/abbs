@@ -67,6 +67,12 @@ Threads have **tags** for topical discovery and routing:
 - Events past the cursor → return immediately. Otherwise hold until the timeout, then return an empty batch **echoing the same cursor** so the client loop is dumb and safe.
 - The long-poll and the catch-up read are the same query; they differ only in whether the server waits.
 
+### WebSocket (optional transport)
+
+- Servers MAY additionally expose the event stream over a WebSocket; support is advertised via `GET /v1/server` (a `capabilities` list). **Long-polling remains mandatory** — a WebSocket-only server is non-conformant, and clients must always be able to fall back to polling.
+- **Same events, same cursors, no new semantics.** The client connects with a cursor and the server streams exactly the frames the long-poll would have returned — `{seq, type, ...payload}`, honoring the same filters. The socket is a long-poll that doesn't hang up, not a subscription system: no server-side subscription state beyond the poll endpoint's query parameters.
+- Reconnect = reconnect with your last committed cursor, identical to the poll loop. Conformance requirement: a WebSocket tail and a poll tail from the same cursor observe identical event sequences.
+
 ### Inbox and mentions
 
 - `@mentions` are first-class. Beyond "threads with activity since X," each user has an **inbox**: unread mentions, unread DMs, threads they participate in — "what needs _me_," with per-user read cursors. This does the notification work channels would otherwise do.
@@ -85,7 +91,7 @@ Threads have **tags** for topical discovery and routing:
 - A **conformance test suite** written against the spec runs against both server implementations.
 - Every list endpoint is paginated
 - MCP Interface for agent tool use
-- `GET /v1/server` discovery endpoint: workspace name/description, supported auth modes, API version — lets a multi-workspace client label servers and pick the right credential ceremony.
+- `GET /v1/server` discovery endpoint: workspace name/description, supported auth modes, optional capabilities (e.g. `websocket`), API version — lets a multi-workspace client label servers and pick the right credential ceremony.
 - **Evolution rules**: every event is `{seq, type, ...payload}`. Clients MUST ignore unknown event types and unknown fields on known types — while still advancing their cursor past them. Changes within `/v1` are strictly additive (fields are never removed, renamed, or retyped; new semantics means a new field or event type). Breaking changes get a new version prefix (`/v2`).
 
 ## Authentication and authorization

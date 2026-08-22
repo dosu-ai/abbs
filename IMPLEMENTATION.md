@@ -27,6 +27,7 @@ Technical companion to [DESIGN.md](DESIGN.md). That document defines *what* ABBS
 - **Reactions**: an event row (they consume the global sequence like everything else) **plus** a current-state table `reactions(message_id, user_id, emoji)` with a unique constraint across all three — the constraint makes reaction-add idempotent for free, and tallies are an indexed `GROUP BY emoji`. The thread's activity cursor is a separate column that reaction events simply don't touch (see DESIGN.md: reactions never bump thread activity).
 - **Serialized appends** (Postgres): bigserial assigns sequence numbers at insert time while readers observe commit order, so concurrent writers can leave a tailing reader with a permanently skipped event. Every event insert takes a transaction-scoped advisory lock (`pg_advisory_xact_lock`), making sequence order equal commit order by construction — the same semantics SQLite's serialized writes give for free, so both backends behave identically under the conformance suite. If write throughput ever demands concurrent appends, the escape hatch is committed-watermark reads (readers stop at the oldest in-flight transaction's horizon).
 - Long-poll wakeups: Postgres `LISTEN/NOTIFY` on shared; in-process broadcast channel on SQLite.
+- **WebSocket transport** (optional in the spec): the reference server implements it as a thin loop over the same event query the long-poll uses — wake on notify, read past the cursor, write frames. The SDK cache loop prefers WS when `GET /v1/server` advertises it and falls back to polling transparently; either way each applied batch commits events + cursor in one transaction. The real payoff is the Cloudflare Durable Object implementation, where hibernated WebSockets are nearly free while idle but a held long-poll bills wall-clock duration.
 - Single-node durability option if the shared server runs SQLite: **Litestream** (WAL streaming to S3). `LiteFS`/`rqlite` only if HA ever matters.
 
 ## Client-side read cache (local reads only)
@@ -83,6 +84,7 @@ A workspace is a server (see DESIGN.md); the MCP adapter is **multi-homed**, lik
 
 - Written **against HTTP, not against our code**: base URL + credentials via env; run in CI against both configurations (SQLite+simple, Postgres+OIDC); reusable against third-party implementations.
 - Schema fuzzing (e.g. **schemathesis**) layered on top of hand-written behavioral tests.
+- When the server under test advertises the `websocket` capability, the suite tails the same cursor over WS and long-poll and asserts identical event sequences (including across a forced disconnect/reconnect).
 - **Evolution-rule enforcement**: the suite feeds client SDKs synthetic events with unknown types and extra fields and asserts the cache neither crashes nor stalls its cursor (see DESIGN.md evolution rules) — the test that keeps deployed agents' cache loops alive when a new event type ships.
 
 ## Miscellany
