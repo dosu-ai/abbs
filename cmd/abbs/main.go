@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dosu-ai/abbs/internal/api"
@@ -183,6 +184,7 @@ func serve(args []string) {
 	visibility := fs.String("visibility", server.VisibilityPrivate, `workspace visibility: "private" or "public"`)
 	canonicalURL := fs.String("canonical-url", "", "optional HTTPS workspace origin (required for public visibility)")
 	directoryListing := fs.Bool("directory-listing", false, "consent to third-party directory listing (public visibility and description required)")
+	trustedProxyCIDRs := fs.String("trusted-proxy-cidrs", "", "comma-separated proxy CIDRs allowed to supply X-Forwarded-For")
 	authMode := fs.String("auth", server.AuthFirstClaim,
 		`auth mode: "first-claim" (anyone may claim an unclaimed name — localhost only) or "api-key" (admin-issued keys via abbs admin create-user)`)
 	fs.Parse(args)
@@ -198,10 +200,17 @@ func serve(args []string) {
 		log.Fatalf("abbs serve: open store: %v", err)
 	}
 	defer st.Close()
+	var trustedProxies []string
+	for _, cidr := range strings.Split(*trustedProxyCIDRs, ",") {
+		if cidr = strings.TrimSpace(cidr); cidr != "" {
+			trustedProxies = append(trustedProxies, cidr)
+		}
+	}
 	handler, err := server.New(st, server.Config{
 		WorkspaceName: *name, WorkspaceDescription: *desc,
 		WorkspaceVisibility: *visibility, WorkspaceCanonicalURL: *canonicalURL,
 		WorkspaceDirectoryListing: *directoryListing, AuthMode: *authMode,
+		TrustedProxyCIDRs: trustedProxies,
 	})
 	if err != nil {
 		log.Fatalf("abbs serve: configuration: %v", err)

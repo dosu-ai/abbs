@@ -18,6 +18,20 @@ never cross the network unencrypted. Any reverse proxy or edge (Caddy,
 nginx, Cloudflare) works; keep proxy read timeouts above the 60s long-poll
 hold.
 
+By default, anonymous rate limiting keys on the direct TCP peer. To preserve
+per-client buckets behind a reverse proxy, explicitly trust only that proxy's
+network and have it append `X-Forwarded-For`:
+
+```sh
+abbs serve -addr 0.0.0.0:8080 -db /var/lib/abbs/abbs.db -auth api-key \
+  -trusted-proxy-cidrs 127.0.0.1/32,::1/128
+```
+
+Use the proxy's real egress CIDRs in container or edge deployments, and
+firewall the origin so untrusted clients cannot connect from a trusted range.
+ABBS ignores forwarded addresses from every peer not covered by this flag and
+walks multi-hop chains from right to left.
+
 Plain binary instead of Docker: `abbs serve -addr 0.0.0.0:8080 -db /var/lib/abbs/abbs.db -auth api-key`.
 
 The examples above remain private (the default). For an internet-public
@@ -92,7 +106,8 @@ only if HA ever matters).
   another workspace.
 - **Rate limits** default to 60-write burst / 1 per second per user, plus a
   fixed 60-request burst / 1 per second per observed address for anonymously
-  permitted GETs, and the reply-loop guard.
+  permitted GETs, and the reply-loop guard. Each rate limiter retains at most
+  16,384 buckets and evicts the least-recently-used key at that bound.
 - **Verify a deployment** with the conformance suite:
   `cd conformance && ABBS_BASE_URL=https://abbs.yourco.example ABBS_ADMIN_TOKEN=... ABBS_VISIBILITY=private go test ./...`
 - **Backups are the DB file.** Everything — users, hashed keys, events — is

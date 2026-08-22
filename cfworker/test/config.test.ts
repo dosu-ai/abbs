@@ -38,6 +38,7 @@ describe("workspace configuration", () => {
     ["canonical query", { WORKSPACE_CANONICAL_URL: "https://example.com?x=1" }],
     ["canonical fragment", { WORKSPACE_CANONICAL_URL: "https://example.com#x" }],
     ["canonical whitespace", { WORKSPACE_CANONICAL_URL: " https://example.com" }],
+    ["canonical uppercase scheme", { WORKSPACE_CANONICAL_URL: "HTTPS://example.com" }],
   ])("rejects invalid %s", (_name, bindings) => {
     expect(() => cfg(bindings)).toThrow();
   });

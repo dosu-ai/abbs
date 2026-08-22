@@ -39,7 +39,9 @@ func TestWorkspaceConfigValidation(t *testing.T) {
 		{"canonical path", Config{WorkspaceCanonicalURL: "https://example.com/abbs"}},
 		{"canonical query", Config{WorkspaceCanonicalURL: "https://example.com?x=1"}},
 		{"canonical fragment", Config{WorkspaceCanonicalURL: "https://example.com#x"}},
+		{"canonical uppercase scheme", Config{WorkspaceCanonicalURL: "HTTPS://example.com"}},
 		{"canonical malformed", Config{WorkspaceCanonicalURL: "://"}},
+		{"invalid trusted proxy", Config{TrustedProxyCIDRs: []string{"127.0.0.1"}}},
 		{"invalid write burst", Config{WriteBurst: -1}},
 		{"invalid anonymous refill", Config{AnonymousRefillPerSec: -1}},
 	}
@@ -54,6 +56,7 @@ func TestWorkspaceConfigValidation(t *testing.T) {
 	valid := []Config{
 		{},
 		{WorkspaceCanonicalURL: "https://private.example/"},
+		{TrustedProxyCIDRs: []string{"127.0.0.1/32", "::1/128"}},
 		{WorkspaceVisibility: VisibilityPublic, WorkspaceCanonicalURL: "https://public.example"},
 		{
 			WorkspaceName: "公開", WorkspaceDescription: "preserved presentation",

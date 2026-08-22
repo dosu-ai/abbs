@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,29 +19,45 @@ import (
 // (username for writes, observed address for anonymous reads). No Redis until
 // a second server node exists.
 type limiter struct {
-	mu     sync.Mutex
-	burst  float64
-	refill float64 // tokens per second
-	users  map[string]*bucket
+	mu         sync.Mutex
+	burst      float64
+	refill     float64 // tokens per second
+	maxBuckets int
+	buckets    map[string]*list.Element
+	lru        *list.List
 }
 
 type bucket struct {
+	key    string
 	tokens float64
 	last   time.Time
 }
 
-func newLimiter(burst int, refillPerSec float64) *limiter {
-	return &limiter{burst: float64(burst), refill: refillPerSec, users: map[string]*bucket{}}
+func newLimiter(burst int, refillPerSec float64, maxBuckets int) *limiter {
+	return &limiter{
+		burst: float64(burst), refill: refillPerSec, maxBuckets: maxBuckets,
+		buckets: map[string]*list.Element{}, lru: list.New(),
+	}
 }
 
 // allow consumes one token; when exhausted it reports the seconds to wait.
 func (l *limiter) allow(user string, at time.Time) (ok bool, retryAfter int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	b, found := l.users[user]
+	elem, found := l.buckets[user]
+	var b *bucket
 	if !found {
-		b = &bucket{tokens: l.burst, last: at}
-		l.users[user] = b
+		if l.lru.Len() >= l.maxBuckets {
+			oldest := l.lru.Front()
+			delete(l.buckets, oldest.Value.(*bucket).key)
+			l.lru.Remove(oldest)
+		}
+		b = &bucket{key: user, tokens: l.burst, last: at}
+		elem = l.lru.PushBack(b)
+		l.buckets[user] = elem
+	} else {
+		b = elem.Value.(*bucket)
+		l.lru.MoveToBack(elem)
 	}
 	b.tokens = min(l.burst, b.tokens+at.Sub(b.last).Seconds()*l.refill)
 	b.last = at
