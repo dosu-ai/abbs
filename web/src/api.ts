@@ -10,17 +10,25 @@ import { getWorkspace, listWorkspaces } from "./registry";
 import type { Env, RegistryWorkspace } from "./types";
 import {
   fetchMessages,
+  fetchPublicThread,
+  fetchPublicThreads,
   fetchTags,
-  fetchThread,
-  fetchThreads,
   fetchUser,
   isUnreachable,
   validatePageParams,
 } from "./upstream";
 import type { PageParams, UpstreamErr } from "./upstream";
+import type { UpstreamResult } from "./upstream";
 
 const PAGE_CACHE = { "Cache-Control": "public, max-age=30" };
 const DIRECTORY_CACHE = { "Cache-Control": "public, max-age=30" };
+
+function upstreamHeaders(result: UpstreamResult<unknown>): Record<string, string> {
+  return {
+    ...PAGE_CACHE,
+    ...(result.ok && result.stale ? { "X-ABBS-Upstream-State": "stale" } : {}),
+  };
+}
 
 export function workspaceJson(ws: RegistryWorkspace): Record<string, unknown> {
   return {
@@ -36,6 +44,8 @@ export function workspaceJson(ws: RegistryWorkspace): Record<string, unknown> {
     last_checked_at: ws.lastCheckedAt,
     last_success_at: ws.lastSuccessAt,
     last_error_code: ws.lastErrorCode,
+    search_eligible: ws.searchEligible,
+    search_eligible_at: ws.searchEligibleAt,
   };
 }
 
@@ -112,8 +122,8 @@ export async function apiThreads(
   return withWorkspace(env, slug, async (ws) => {
     const params = pageParamsFrom(url);
     if (params === null) return problemResponse(400, "validation", "invalid page, limit, or tag");
-    const r = await fetchThreads(ws, params, refresh);
-    return r.ok ? jsonResponse(200, r.value, PAGE_CACHE) : upstreamProblem(r);
+    const r = await fetchPublicThreads(ws, params, refresh);
+    return r.ok ? jsonResponse(200, r.value, upstreamHeaders(r)) : upstreamProblem(r);
   });
 }
 
@@ -124,8 +134,8 @@ export async function apiThread(
   refresh: boolean,
 ): Promise<Response> {
   return withWorkspace(env, slug, async (ws) => {
-    const r = await fetchThread(ws, threadId, refresh);
-    return r.ok ? jsonResponse(200, r.value, PAGE_CACHE) : upstreamProblem(r);
+    const r = await fetchPublicThread(ws, threadId, refresh);
+    return r.ok ? jsonResponse(200, r.value, upstreamHeaders(r)) : upstreamProblem(r);
   });
 }
 
@@ -139,8 +149,10 @@ export async function apiMessages(
   return withWorkspace(env, slug, async (ws) => {
     const params = pageParamsFrom(url);
     if (params === null) return problemResponse(400, "validation", "invalid page or limit");
+    const thread = await fetchPublicThread(ws, threadId, refresh);
+    if (!thread.ok) return upstreamProblem(thread);
     const r = await fetchMessages(ws, threadId, params, refresh);
-    return r.ok ? jsonResponse(200, r.value, PAGE_CACHE) : upstreamProblem(r);
+    return r.ok ? jsonResponse(200, r.value, upstreamHeaders(r)) : upstreamProblem(r);
   });
 }
 
@@ -154,13 +166,13 @@ export async function apiTags(
     const params = pageParamsFrom(url);
     if (params === null) return problemResponse(400, "validation", "invalid page or limit");
     const r = await fetchTags(ws, params, refresh);
-    return r.ok ? jsonResponse(200, r.value, PAGE_CACHE) : upstreamProblem(r);
+    return r.ok ? jsonResponse(200, r.value, upstreamHeaders(r)) : upstreamProblem(r);
   });
 }
 
 export async function apiUser(env: Env, slug: string, username: string): Promise<Response> {
   return withWorkspace(env, slug, async (ws) => {
     const r = await fetchUser(ws, username);
-    return r.ok ? jsonResponse(200, r.value, PAGE_CACHE) : upstreamProblem(r);
+    return r.ok ? jsonResponse(200, r.value, upstreamHeaders(r)) : upstreamProblem(r);
   });
 }

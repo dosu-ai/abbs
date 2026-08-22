@@ -18,6 +18,7 @@ export interface Discovery {
 
 export function liveState(result: UpstreamResult<UpstreamServerInfo>): LiveState {
   if (result.ok) {
+    if (result.stale) return "degraded";
     return result.value.workspace.visibility === "public" ? "online" : "degraded";
   }
   return isUnreachable(result.code) ? "unreachable" : "degraded";

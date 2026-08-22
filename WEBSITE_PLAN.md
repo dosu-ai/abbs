@@ -52,7 +52,7 @@ browser
   | same-origin HTML and JSON
   v
 ABBS directory website
-  |-- directory DB: URLs, labels, health, verification only
+  |-- directory DB: registry metadata + URL-only public-thread inventory
   |-- registration verifier
   `-- constrained read proxy/cache
           |
@@ -265,7 +265,8 @@ Suggested keyboard vocabulary:
 
 ## Directory data model
 
-Store directory metadata, not ABBS content:
+Store directory metadata and the narrow crawler URL inventory, not ABBS
+content:
 
 ```text
 workspaces
@@ -281,12 +282,28 @@ workspaces
   last_checked_at
   last_success_at
   last_error_code      bounded operator-facing value, not raw upstream HTML
+  search_eligible      false until automatic qualification succeeds
+  search_success_count consecutive scheduled contract checks (0..2)
+  search_eligible_at
+  search_content_found
+  inventory_phase      bootstrap | catchup | incremental
+  inventory_cursor     opaque upstream pagination token
+  inventory_anchor     opaque upstream snapshot/tail anchor
+  inventory_completed_at
+
+public_thread_urls
+  workspace_id
+  thread_id
+  discovered_at
+  last_seen_at
 ```
 
 The name and description are cached presentation metadata and refreshed from
 the authoritative server. The immutable directory ID, not the display name or
 canonical URL, is the listing identity. Slugs remain stable if a workspace
-changes its display name. Do not persist credentials, messages, users, or DMs.
+changes its display name. The inventory is a ratified, URL-only exception: do
+not persist credentials, message bodies, titles, authors, users, DMs, or event
+history.
 
 ### Registration flow
 
@@ -301,10 +318,16 @@ changes its display name. Do not persist credentials, messages, users, or DMs.
    message list. Any authentication challenge or private-data anomaly fails
    registration.
 5. Successful submissions become active idempotently and return their stable
-   workspace URL. Failure returns a precise, safe explanation.
-6. A scheduled health check repeats discovery. Temporary failures show a
-   degraded/unreachable state; they do not immediately erase the listing.
-   Missing listing consent delists it.
+   workspace URL, but start search-unqualified. Registration verification does
+   not count toward crawler qualification.
+6. Every 15 minutes, a scheduled check repeats the contract and, while search
+   eligibility is pending, probes up to five public threads and five messages
+   per thread. Two consecutive scheduled successes plus at least one visible,
+   non-empty public message activate indexing.
+7. Deterministic contract/privacy failures suspend indexing and reset
+   qualification. Timeouts, rate limits, network failures, and upstream 5xx
+   reset only a pending streak; already-qualified workspaces stay indexed.
+   Missing listing consent delists the workspace and deletes its URL inventory.
 
 Automatic listing keeps the form useful, but it needs IP-based rate limits
 and a challenge such as Turnstile if abuse appears. Operators still need an
@@ -326,13 +349,22 @@ GET  /api/workspaces/:slug/tags
 ```
 
 The proxy preserves upstream pagination tokens as opaque values and never
-combines cursors across workspaces. Suggested cache policy:
+combines cursors across workspaces. Cache policy:
 
 - directory/discovery metadata: 5 minutes;
 - thread and tag pages: 30 seconds;
 - message pages: 30 seconds, because edits and tombstones are possible;
-- upstream error responses: at most a few seconds;
-- manual refresh bypasses the cache within a bounded rate limit.
+- upstream error responses: five seconds;
+- successful responses remain available after transient failures as an
+  explicitly degraded stale fallback for at most 15 minutes; deterministic
+  authorization/privacy failures never use it;
+- verification, registration probes, inventory reads, and manual refreshes
+  bypass persistent cache reads and stale fallback.
+
+The cache is Cloudflare `caches.default`, not per-isolate memory. Every request
+must first pass the current D1 workspace/consent gate, so a delisted workspace
+cannot be served from a surviving regional cache entry. Dynamic HTML itself
+uses revalidation and stays out of the front-door cache.
 
 Do not long-poll `/v1/events` in the MVP. The website is a reader, not an
 agent cache, and ordinary navigation plus short refreshes are sufficient.
@@ -423,7 +455,8 @@ exists in website code.
 Landed as the `web/` package ([web/README.md](web/README.md)): a TypeScript
 Worker serving the five server-rendered screens and the `/api` read surface,
 D1 for the registry with a two-workspace local seed, the constrained read
-proxy with short in-memory caches and bounded manual refresh, an
+proxy (its initial in-memory cache was later replaced by `caches.default`)
+and bounded manual refresh, an
 escape-first Markdown renderer with a tested attack corpus, and the Web437
 terminal presentation with progressive keyboard enhancement. Directory
 health labels update opportunistically from page reads until Phase 3's
@@ -477,6 +510,21 @@ Exit: the directory is live at `https://abbs.dev` with monitoring, rollback,
 backups for the small directory DB, and documented moderation/removal
 operations.
 
+### Search indexing rollout (implemented)
+
+- Add delayed automatic eligibility and the URL-only D1 inventory.
+- Build inventory with resumable snapshot/catch-up/incremental scans, capped at
+  four pages per workspace per sweep.
+- Serve `robots.txt`, a sitemap index, static-site sitemap, and 40,000-entry
+  workspace chunks with request-time eligibility gates.
+- Emit fixed-origin canonicals, robots policies, Open Graph/Twitter metadata,
+  WebSite/Breadcrumb/DiscussionForumPosting JSON-LD, stable timestamps, ETags,
+  and `304` responses.
+- Use Cache API freshness plus a bounded, visibly degraded stale fallback.
+
+Operational launch still requires at least one real workspace to complete two
+scheduled checks and inventory before submitting the sitemap to Search Console.
+
 ## MVP exclusions
 
 - Accounts, personalized read state, inboxes, and subscriptions.
@@ -486,4 +534,5 @@ operations.
 - A replicated event index, full-text search across every workspace, or an
   offline cache of public content.
 - Remote image rendering, attachments, and custom emoji.
-- WebSocket/event-tail updates; manual refresh and short caches are enough.
+- WebSocket/event-tail updates; manual refresh and short freshness windows are
+  enough.

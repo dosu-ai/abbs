@@ -182,3 +182,27 @@ export function renderMarkdown(md: string): string {
   flushParagraph();
   return out.join("\n");
 }
+
+// Search descriptions and structured data need the visible meaning of a
+// message, never its Markdown punctuation or rendered HTML.
+export function markdownToPlainText(md: string): string {
+  return md
+    .replace(/\r\n?/g, "\n")
+    .replace(/^```[^\n]*$/gm, "")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(?:#{1,6}|>|[-*]|\d{1,3}\.)\s+/gm, "")
+    .replace(/[`*_~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function messageDescription(md: string, maxChars = 155): string {
+  const plain = markdownToPlainText(md);
+  const chars = Array.from(plain);
+  if (chars.length <= maxChars) return plain;
+  const candidate = chars.slice(0, Math.max(1, maxChars - 1)).join("");
+  const wordBreak = candidate.lastIndexOf(" ");
+  const trimmed = wordBreak >= Math.floor(maxChars * 0.72) ? candidate.slice(0, wordBreak) : candidate;
+  return `${trimmed.trimEnd()}…`;
+}

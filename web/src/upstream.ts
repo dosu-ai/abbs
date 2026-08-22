@@ -8,8 +8,9 @@
 //   - No browser header is forwarded upstream; no upstream header leaks back.
 //   - Time, size, and redirect limits apply to every request.
 //   - Failures become bounded error codes, never reflected upstream bodies.
-//   - Short in-memory response caches (discovery 5m, pages 30s, errors 5s)
-//     absorb load; a bounded manual-refresh bypass revalidates on demand.
+//   - Cloudflare's Cache API retains successful reads for a bounded stale
+//     fallback (15m); discovery is fresh for 5m, content for 30s, and errors
+//     for 5s. Verification and explicit refreshes always go live.
 
 import type {
   RegistryWorkspace,
@@ -42,6 +43,8 @@ export interface UpstreamOk<T> {
   // True when this result came from a live upstream exchange rather than the
   // cache — the signal that a health observation is worth persisting.
   fresh: boolean;
+  // A bounded successful fallback used after a live upstream failure.
+  stale: boolean;
 }
 
 export interface UpstreamErr {
@@ -50,6 +53,7 @@ export interface UpstreamErr {
   status?: number;
   retryAfterSeconds?: number;
   fresh: boolean;
+  stale: false;
 }
 
 export type UpstreamResult<T> = UpstreamOk<T> | UpstreamErr;
@@ -65,7 +69,7 @@ const MAX_BODY_BYTES = 1_048_576; // 1 MiB
 const DISCOVERY_TTL_MS = 300_000; // 5 minutes: directory/discovery metadata
 const PAGE_TTL_MS = 30_000; // 30 seconds: threads, messages, tags (edits/tombstones)
 const ERROR_TTL_MS = 5_000; // upstream errors: at most a few seconds
-const CACHE_MAX_ENTRIES = 512;
+const STALE_TTL_MS = 15 * 60 * 1000;
 
 // Validation for values that become upstream URL components. Anything that
 // fails validation is rejected locally as not-found/validation — it never
@@ -88,6 +92,7 @@ export interface PageParams {
   page?: string;
   limit?: number;
   tags?: string[];
+  since?: string;
 }
 
 // validatePageParams normalizes untrusted query values into safe upstream
@@ -96,6 +101,7 @@ export function validatePageParams(p: {
   page?: string | null;
   limit?: string | null;
   tags?: string[];
+  since?: string | null;
 }): PageParams | null {
   const out: PageParams = {};
   if (p.page != null && p.page !== "") {
@@ -115,6 +121,10 @@ export function validatePageParams(p: {
     }
     out.tags = p.tags;
   }
+  if (p.since != null && p.since !== "") {
+    if (p.since.length > PAGE_TOKEN_MAX_CHARS) return null;
+    out.since = p.since;
+  }
   return out;
 }
 
@@ -128,38 +138,55 @@ export function setUpstreamFetchForTests(f: FetchLike | null): void {
 }
 
 interface CacheEntry {
-  expiresAt: number;
+  storedAt: number;
   result: UpstreamResult<unknown>;
 }
 
-// Per-isolate response cache. Deliberately not the global Cache API: entries
-// are tiny, TTLs are seconds-to-minutes, and an in-memory map is exactly as
-// testable as the plan needs for Phase 2.
-const cache = new Map<string, CacheEntry>();
+// Incrementing the namespace makes the test seam deterministic without
+// depending on a non-standard Cache API enumeration or global purge.
+let cacheGeneration = 0;
 
 // Test seam only.
 export function clearUpstreamCache(): void {
-  cache.clear();
+  cacheGeneration++;
 }
 
-function cacheGet(key: string, now: number): UpstreamResult<unknown> | null {
-  const e = cache.get(key);
-  if (e === undefined) return null;
-  if (e.expiresAt <= now) {
-    cache.delete(key);
+function cacheRequest(key: string): Request {
+  const url = new URL("https://abbs.dev/__upstream-cache");
+  url.searchParams.set("generation", String(cacheGeneration));
+  url.searchParams.set("key", key);
+  return new Request(url, { method: "GET" });
+}
+
+async function cacheGet(key: string): Promise<CacheEntry | null> {
+  try {
+    const response = await caches.default.match(cacheRequest(key));
+    if (response === undefined) return null;
+    const parsed = (await response.json()) as Partial<CacheEntry>;
+    if (typeof parsed.storedAt !== "number" || parsed.result === undefined) return null;
+    return parsed as CacheEntry;
+  } catch {
     return null;
   }
-  return e.result;
 }
 
-function cachePut(key: string, result: UpstreamResult<unknown>, ttlMs: number, now: number): void {
-  if (cache.size >= CACHE_MAX_ENTRIES) {
-    // Maps iterate in insertion order; dropping the oldest entry bounds
-    // memory without bookkeeping.
-    const oldest = cache.keys().next();
-    if (!oldest.done) cache.delete(oldest.value);
+async function cachePut(
+  key: string,
+  result: UpstreamResult<unknown>,
+  retentionMs: number,
+  now: number,
+): Promise<void> {
+  try {
+    const response = new Response(JSON.stringify({ storedAt: now, result } satisfies CacheEntry), {
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": `max-age=${Math.max(1, Math.ceil(retentionMs / 1000))}`,
+      },
+    });
+    await caches.default.put(cacheRequest(key), response);
+  } catch {
+    // Cache availability must never make the directory unavailable.
   }
-  cache.set(key, { expiresAt: now + ttlMs, result });
 }
 
 function parseRetryAfter(h: string | null): number | undefined {
@@ -210,13 +237,44 @@ async function upstreamGet<T>(
   const qs = query.toString();
   const key = `${ws.id} ${path}${qs === "" ? "" : "?" + qs}`;
   const now = Date.now();
-  if (!refresh) {
-    const hit = cacheGet(key, now);
-    if (hit !== null) return { ...hit, fresh: false } as UpstreamResult<T>;
+  const privacyBypass =
+    ws.lastErrorCode === "not-public" || ws.lastErrorCode === "private-thread-leak";
+  if (refresh || privacyBypass) {
+    // Verification/registration/inventory probes and explicit refreshes do
+    // not read or write persistent cache entries and never use stale data.
+    return liveGet(ws, path, qs, validate);
+  }
+  let cached: CacheEntry | null = null;
+  cached = await cacheGet(key);
+  if (cached !== null) {
+    const age = Math.max(0, now - cached.storedAt);
+    const freshness = cached.result.ok ? ttlMs : errorTtl(cached.result);
+    if (age <= freshness) {
+      return { ...cached.result, fresh: false, stale: false } as UpstreamResult<T>;
+    }
   }
 
   const result = await liveGet(ws, path, qs, validate);
-  cachePut(key, result, result.ok ? ttlMs : errorTtl(result), now);
+  if (result.ok) {
+    await cachePut(key, result, STALE_TTL_MS, now);
+    return result;
+  }
+  if (
+    cached !== null &&
+    cached.result.ok &&
+    now - cached.storedAt <= STALE_TTL_MS &&
+    (result.code === "timeout" ||
+      result.code === "network" ||
+      result.code === "rate-limited" ||
+      result.code === "http-5xx")
+  ) {
+    console.warn(
+      "upstream stale fallback",
+      JSON.stringify({ workspace_id: ws.id, path, error_code: result.code }),
+    );
+    return { ...cached.result, fresh: false, stale: true } as UpstreamResult<T>;
+  }
+  await cachePut(key, result, errorTtl(result), now);
   return result;
 }
 
@@ -238,10 +296,10 @@ async function liveGet<T>(
   try {
     base = new URL(ws.baseUrl);
   } catch {
-    return { ok: false, code: "insecure-url", fresh: true };
+    return { ok: false, code: "insecure-url", fresh: true, stale: false };
   }
   if (base.protocol !== "https:" && !isLoopbackHost(base.hostname)) {
-    return { ok: false, code: "insecure-url", fresh: true };
+    return { ok: false, code: "insecure-url", fresh: true, stale: false };
   }
 
   const url = base.origin + path + (qs === "" ? "" : "?" + qs);
@@ -265,6 +323,7 @@ async function liveGet<T>(
       ok: false,
       code: ctrl.signal.aborted ? "timeout" : "network",
       fresh: true,
+      stale: false,
     };
   } finally {
     clearTimeout(timer);
@@ -272,7 +331,7 @@ async function liveGet<T>(
 
   if (resp.status >= 300 && resp.status < 400) {
     await resp.body?.cancel();
-    return { ok: false, code: "redirect", status: resp.status, fresh: true };
+    return { ok: false, code: "redirect", status: resp.status, fresh: true, stale: false };
   }
   if (resp.status === 429) {
     await resp.body?.cancel();
@@ -282,11 +341,12 @@ async function liveGet<T>(
       status: 429,
       retryAfterSeconds: parseRetryAfter(resp.headers.get("Retry-After")),
       fresh: true,
+      stale: false,
     };
   }
   if (resp.status >= 500) {
     await resp.body?.cancel();
-    return { ok: false, code: "http-5xx", status: resp.status, fresh: true };
+    return { ok: false, code: "http-5xx", status: resp.status, fresh: true, stale: false };
   }
   if (resp.status !== 200) {
     await resp.body?.cancel();
@@ -295,33 +355,34 @@ async function liveGet<T>(
       code: resp.status === 404 ? "not-found" : "http-4xx",
       status: resp.status,
       fresh: true,
+      stale: false,
     };
   }
 
   const ct = resp.headers.get("Content-Type") ?? "";
   if (!/^application\/(problem\+)?json\b/i.test(ct)) {
     await resp.body?.cancel();
-    return { ok: false, code: "bad-content-type", fresh: true };
+    return { ok: false, code: "bad-content-type", fresh: true, stale: false };
   }
 
   let text: string | null;
   try {
     text = await readBodyCapped(resp);
   } catch {
-    return { ok: false, code: "network", fresh: true };
+    return { ok: false, code: "network", fresh: true, stale: false };
   }
-  if (text === null) return { ok: false, code: "too-large", fresh: true };
+  if (text === null) return { ok: false, code: "too-large", fresh: true, stale: false };
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { ok: false, code: "bad-json", fresh: true };
+    return { ok: false, code: "bad-json", fresh: true, stale: false };
   }
 
   const value = validate(parsed);
-  if (value === null) return { ok: false, code: "bad-schema", fresh: true };
-  return { ok: true, value, fresh: true };
+  if (value === null) return { ok: false, code: "bad-schema", fresh: true, stale: false };
+  return { ok: true, value, fresh: true, stale: false };
 }
 
 // --- shape validation -------------------------------------------------------
@@ -482,6 +543,7 @@ function pageQuery(p: PageParams): URLSearchParams {
   if (p.tags !== undefined) for (const t of p.tags) q.append("tag", t);
   if (p.page !== undefined) q.set("page", p.page);
   if (p.limit !== undefined) q.set("limit", String(p.limit));
+  if (p.since !== undefined) q.set("since", p.since);
   return q;
 }
 
@@ -500,15 +562,42 @@ export function fetchThreads(
   return upstreamGet(ws, "/v1/threads", pageQuery(params), PAGE_TTL_MS, validatePageOf(validateThread), refresh);
 }
 
+// Rendering/proxy callers use the privacy-safe wrappers. Verification and
+// inventory intentionally use the raw variants above so they can classify a
+// non-public anonymous result as a first-class privacy failure.
+export async function fetchPublicThreads(
+  ws: RegistryWorkspace,
+  params: PageParams,
+  refresh = false,
+): Promise<UpstreamResult<UpstreamPage<UpstreamThread>>> {
+  const result = await fetchThreads(ws, params, refresh);
+  if (result.ok && result.value.items.some((thread) => thread.kind !== "public")) {
+    return { ok: false, code: "not-public", fresh: result.fresh, stale: false };
+  }
+  return result;
+}
+
 export function fetchThread(
   ws: RegistryWorkspace,
   threadId: string,
   refresh = false,
 ): Promise<UpstreamResult<UpstreamThread>> {
   if (!isValidThreadId(threadId)) {
-    return Promise.resolve({ ok: false, code: "not-found", status: 404, fresh: false });
+    return Promise.resolve({ ok: false, code: "not-found", status: 404, fresh: false, stale: false });
   }
   return upstreamGet(ws, `/v1/threads/${threadId}`, new URLSearchParams(), PAGE_TTL_MS, validateThread, refresh);
+}
+
+export async function fetchPublicThread(
+  ws: RegistryWorkspace,
+  threadId: string,
+  refresh = false,
+): Promise<UpstreamResult<UpstreamThread>> {
+  const result = await fetchThread(ws, threadId, refresh);
+  if (result.ok && result.value.kind !== "public") {
+    return { ok: false, code: "not-public", fresh: result.fresh, stale: false };
+  }
+  return result;
 }
 
 export function fetchMessages(
@@ -518,7 +607,7 @@ export function fetchMessages(
   refresh = false,
 ): Promise<UpstreamResult<UpstreamPage<UpstreamMessage>>> {
   if (!isValidThreadId(threadId)) {
-    return Promise.resolve({ ok: false, code: "not-found", status: 404, fresh: false });
+    return Promise.resolve({ ok: false, code: "not-found", status: 404, fresh: false, stale: false });
   }
   return upstreamGet(
     ws,
@@ -543,8 +632,8 @@ export function fetchUser(
   username: string,
 ): Promise<UpstreamResult<UpstreamPublicUser>> {
   if (!isValidUsername(username)) {
-    return Promise.resolve({ ok: false, code: "not-found", status: 404, fresh: false });
+    return Promise.resolve({ ok: false, code: "not-found", status: 404, fresh: false, stale: false });
   }
   // Usernames match ^[a-z0-9][a-z0-9._-]{0,31}$ — safe as a path segment.
-  return upstreamGet(ws, `/v1/users/${username}`, new URLSearchParams(), DISCOVERY_TTL_MS, validatePublicUser, false);
+  return upstreamGet(ws, `/v1/users/${username}`, new URLSearchParams(), PAGE_TTL_MS, validatePublicUser, false);
 }

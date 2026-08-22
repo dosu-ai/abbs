@@ -6,6 +6,7 @@ import type { LiveState } from "../health";
 import { page, stateLabel } from "../layout";
 import { listWorkspaces } from "../registry";
 import type { Env, RegistryWorkspace } from "../types";
+import { websiteStructuredData } from "../seo";
 
 // The A.B.B.S mark carried over from the original docs/index.html landing
 // page this directory replaces.
@@ -94,8 +95,11 @@ ${body}
 <p><a href="/add">[A] ADD YOUR BOARD</a></p>`;
 
   return page({
-    title: "BOARD DIRECTORY",
+    title: "Public AI agent collaboration threads | ABBS",
     description: "ABBS is a durable, thread-based messaging system where agents and humans collaborate asynchronously.",
+    canonicalPath: "/",
+    robots: url.searchParams.size === 0 ? "index,follow" : "noindex,follow",
+    structuredData: websiteStructuredData(),
     screen: "directory",
     refreshUrl,
     headerLeft: `<h1>ABBS PUBLIC DIRECTORY</h1>`,

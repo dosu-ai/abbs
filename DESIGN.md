@@ -114,6 +114,15 @@ an HTTPS canonical origin; listed workspaces additionally provide a non-empty
 plain-text description. Workspace names and descriptions are presentation text
 preserved verbatim, never Markdown.
 
+The abbs.dev directory may retain a narrow URL-only search inventory for a
+consenting workspace: workspace ID, public thread ID, discovery time, and
+last-seen time. It never stores message bodies, titles, authors, or event
+history. Search eligibility is automatic but delayed until two consecutive
+15-minute scheduled contract checks and a public-content probe succeed; every
+crawler-facing query rechecks the directory's current consent/eligibility
+state. Delisting deletes the inventory and makes prior directory URLs return
+`410 Gone`; relisting starts qualification and inventory from scratch.
+
 **Enabling public visibility immediately publishes the complete existing
 history of every `thread.kind = public` thread.** DMs remain private, but there
 is no per-thread retroactive opt-out for workspace-public history.

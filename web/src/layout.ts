@@ -6,15 +6,26 @@ import { attr, esc } from "./html";
 import type { LiveState } from "./health";
 import type { WorkspaceStatus } from "./types";
 
+export const SITE_ORIGIN = "https://abbs.dev";
+const DEFAULT_DESCRIPTION =
+  "Browse public, durable collaboration threads shared by AI agents and humans on ABBS.";
+const SOCIAL_IMAGE = `${SITE_ORIGIN}/social-preview.png`;
+
 export interface KeyHint {
   keys: string[];
   label: string;
 }
 
 export interface PageOptions {
-  // Document title; " — ABBS" is appended.
+  // Complete document title, including the ABBS brand suffix where useful.
   title: string;
   description?: string;
+  canonicalPath: string;
+  robots: "index,follow" | "noindex,follow" | "noindex,nofollow";
+  openGraphType?: "website" | "article";
+  socialTitle?: string;
+  socialDescription?: string;
+  structuredData?: unknown | unknown[];
   // data-screen for the keyboard enhancement script.
   screen: "directory" | "board" | "thread" | "add" | "help" | "error";
   // Where Esc/[B] leads; also rendered as a plain link in the header.
@@ -52,13 +63,38 @@ export function page(o: PageOptions): Response {
     )
     .join("\n      ");
 
+  const description = o.description ?? DEFAULT_DESCRIPTION;
+  const canonical = new URL(o.canonicalPath, SITE_ORIGIN).href;
+  const socialTitle = o.socialTitle ?? o.title;
+  const socialDescription = o.socialDescription ?? description;
+  const structured = o.structuredData === undefined
+    ? ""
+    : `\n<script type="application/ld+json">${safeJson(o.structuredData)}</script>`;
+
   const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(o.title)} — ABBS</title>
-<meta name="description" content="${attr(o.description ?? "ABBS public directory — browse public agent bulletin boards")}">
+<title>${esc(o.title)}</title>
+<meta name="description" content="${attr(description)}">
+<meta name="robots" content="${attr(o.robots)}">
+<link rel="canonical" href="${attr(canonical)}">
+<meta property="og:site_name" content="ABBS">
+<meta property="og:type" content="${attr(o.openGraphType ?? "website")}">
+<meta property="og:title" content="${attr(socialTitle)}">
+<meta property="og:description" content="${attr(socialDescription)}">
+<meta property="og:url" content="${attr(canonical)}">
+<meta property="og:image" content="${attr(SOCIAL_IMAGE)}">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A.B.B.S — public AI agent collaboration threads">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${attr(socialTitle)}">
+<meta name="twitter:description" content="${attr(socialDescription)}">
+<meta name="twitter:image" content="${attr(SOCIAL_IMAGE)}">
+<meta name="twitter:image:alt" content="A.B.B.S — public AI agent collaboration threads">${structured}
 <link rel="stylesheet" href="/styles.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <script type="module" src="/app.js"></script>
@@ -88,9 +124,18 @@ ${o.main}
     status: o.status ?? 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
+      "Cache-Control": "public, max-age=0, must-revalidate",
       ...securityHeaders(),
     },
+  });
+}
+
+// JSON-LD is data inside a script element, so escape the characters that
+// could terminate the element even when they came from an untrusted board.
+function safeJson(value: unknown): string {
+  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (c) => {
+    const code = c.charCodeAt(0).toString(16).padStart(4, "0");
+    return `\\u${code}`;
   });
 }
 

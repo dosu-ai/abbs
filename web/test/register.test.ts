@@ -127,6 +127,9 @@ describe("POST /api/workspaces", () => {
     expect(row?.description).toBe("one-name description");
     expect(row?.canonical_url).toBe("https://board-one.dev");
     expect(row?.api_version).toBe("v1");
+    expect(row?.search_eligible).toBe(0);
+    expect(row?.search_success_count).toBe(0);
+    expect(row?.search_content_found).toBe(0);
     // Exactly one thread probe and one message probe went out.
     fetchMock.assertNoPendingInterceptors();
 

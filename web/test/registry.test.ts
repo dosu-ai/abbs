@@ -8,10 +8,38 @@ import {
   listWorkspaces,
   markDelisted,
   recordCheck,
+  relistWorkspace,
 } from "../src/registry";
 import { seedWorkspace } from "./helpers";
 
 describe("registry", () => {
+  it("defaults pre-search rows to an unqualified bootstrap state", async () => {
+    await env.DB.prepare(
+      `INSERT INTO workspaces (id, slug, base_url, name, description, status, submitted_at)
+       VALUES (?, ?, ?, ?, ?, 'active', ?)`,
+    )
+      .bind(
+        "0198c0de-0000-7000-8000-999999999999",
+        "legacy-search-defaults",
+        "https://legacy-search-defaults.example",
+        "legacy",
+        "legacy row",
+        "2026-08-22T00:00:00Z",
+      )
+      .run();
+    expect(await getWorkspace(env.DB, "legacy-search-defaults")).toMatchObject({
+      searchEligible: false,
+      searchSuccessCount: 0,
+      searchEligibleAt: null,
+      searchContentFound: false,
+      inventoryPhase: "bootstrap",
+      inventoryCursor: null,
+      inventoryAnchor: null,
+      inventoryCompletedAt: null,
+    });
+    await env.DB.prepare("DELETE FROM workspaces WHERE slug = 'legacy-search-defaults'").run();
+  });
+
   it("lists workspaces ordered by name, excluding delisted", async () => {
     await seedWorkspace({ name: "zulu" });
     await seedWorkspace({ name: "Alpha" });
@@ -93,5 +121,26 @@ describe("registry", () => {
       .bind(ws.id)
       .first<{ status: string }>();
     expect(row?.status).toBe("delisted");
+  });
+
+  it("does not reset or delete inventory when relist is called for an active row", async () => {
+    const ws = await seedWorkspace({ searchEligible: true, searchSuccessCount: 2 });
+    await env.DB.prepare(
+      "INSERT INTO public_thread_urls (workspace_id, thread_id, discovered_at, last_seen_at) VALUES (?, ?, ?, ?)",
+    )
+      .bind(
+        ws.id,
+        "0198aaaa-bbbb-7ccc-8ddd-eeeeffff0001",
+        "2026-08-22T00:00:00Z",
+        "2026-08-22T00:00:00Z",
+      )
+      .run();
+    await relistWorkspace(env.DB, ws.id);
+    expect((await getWorkspace(env.DB, ws.slug))?.status).toBe("active");
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS n FROM public_thread_urls WHERE workspace_id = ?")
+        .bind(ws.id)
+        .first<number>("n"),
+    ).toBe(1);
   });
 });

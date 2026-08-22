@@ -4,11 +4,12 @@
 import { attr, esc, timeEl } from "../html";
 import { discover } from "../health";
 import { page, stateLabel } from "../layout";
-import { getWorkspace } from "../registry";
+import { getWorkspaceBySlug } from "../registry";
 import type { Env, RegistryWorkspace, UpstreamThread } from "../types";
-import { fetchTags, fetchThreads, validatePageParams } from "../upstream";
-import { errorPanel, errorStatus, notFoundPage } from "./shared";
+import { fetchPublicThreads, fetchTags, validatePageParams } from "../upstream";
+import { errorPanel, errorStatus, gonePage, notFoundPage } from "./shared";
 import { problemResponse } from "../problems";
+import { breadcrumbStructuredData } from "../seo";
 
 const TAG_ROW_MAX = 16;
 
@@ -39,8 +40,9 @@ export async function boardPage(
   url: URL,
   refresh: boolean,
 ): Promise<Response> {
-  const ws = await getWorkspace(env.DB, slug);
+  const ws = await getWorkspaceBySlug(env.DB, slug);
   if (ws === null) return notFoundPage();
+  if (ws.status === "delisted") return gonePage();
 
   const q = (url.searchParams.get("q") ?? "").slice(0, 100);
   const tag = (url.searchParams.get("tag") ?? "").slice(0, 64);
@@ -55,7 +57,7 @@ export async function boardPage(
 
   const [d, threads, tags] = await Promise.all([
     discover(ws, refresh),
-    fetchThreads(ws, { ...params, limit: 50 }, refresh),
+    fetchPublicThreads(ws, { ...params, limit: 50 }, refresh),
     fetchTags(ws, { limit: 50 }, refresh),
   ]);
 
@@ -128,14 +130,36 @@ ${tagRow}
 ${filterForm}
 ${body}`;
 
+  const cleanPath = `/w/${encodeURIComponent(slug)}`;
+  const realPage = params.page === undefined || (threads.ok && threads.value.items.length > 0);
+  const pagePath =
+    params.page !== undefined && realPage
+      ? `${cleanPath}?page=${encodeURIComponent(params.page)}`
+      : cleanPath;
+  const unknownQuery = [...url.searchParams.keys()].some(
+    (key) => key !== "page" && key !== "q" && key !== "tag" && key !== "refresh",
+  );
+  const filtered = q !== "" || tag !== "" || refresh || unknownQuery;
+  const canonicalPath = q !== "" || tag !== "" ? cleanPath : pagePath;
+  const indexable = ws.searchEligible && status === 200 && realPage && !filtered;
+  const displayState =
+    (threads.ok && threads.stale) || (tags.ok && tags.stale) ? "degraded" : d.state;
+
   return page({
-    title: `${name} / PUBLIC THREADS`,
+    title: `${name} public threads | ABBS`,
     description: description === "" ? undefined : description,
+    canonicalPath,
+    robots: indexable
+      ? "index,follow"
+      : status >= 400 || !ws.searchEligible
+        ? "noindex,nofollow"
+        : "noindex,follow",
+    structuredData: status === 200 ? breadcrumbStructuredData(ws) : undefined,
     screen: "board",
     parentUrl: "/",
     refreshUrl: boardUrl(slug, { tag, q, page: params.page, refresh: true }),
     headerLeft: `<h1>CONNECTED: <span class="ws-name">${esc(name)}</span> / PUBLIC THREADS</h1>`,
-    headerRight: `STATUS: ${stateLabel(d.state)}`,
+    headerRight: `STATUS: ${stateLabel(displayState)}`,
     main,
     keys: [
       { keys: ["J", "K"], label: "MOVE" },

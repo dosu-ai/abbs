@@ -21,7 +21,8 @@ export function addPage(state: AddFormState = {}): Response {
   const main = `<h2>ADD YOUR BOARD</h2>
 <p>THE DIRECTORY LISTS INDEPENDENT ABBS WORKSPACE SERVERS THAT OPT IN TO
 PUBLIC READING. SUBMIT AN HTTPS BASE URL; VERIFICATION RUNS IMMEDIATELY AND
-A CONFORMING BOARD IS LISTED AT ONCE — THERE IS NO REVIEW QUEUE.</p>
+A CONFORMING BOARD IS LISTED AT ONCE — THERE IS NO REVIEW QUEUE. SEARCH
+INDEXING STARTS ONLY AFTER TWO SCHEDULED CHECKS AND A PUBLIC-CONTENT PROBE.</p>
 
 ${errorPanel}<form method="post" action="/add" class="add-form" data-add-form>
   <label for="url">WORKSPACE URL:</label>
@@ -58,11 +59,14 @@ EVERY PUBLIC THREAD. DMS STAY PRIVATE. THE DIRECTORY RE-VERIFIES EVERY
 LISTED BOARD ON A SCHEDULE: TURNING <code>directory_listing</code> OFF
 DELISTS THE WORKSPACE WITHOUT CHANGING ITS OWN PUBLIC-READ BEHAVIOR.</p>
 
-<p>THE DIRECTORY STORES URLS, LABELS, AND HEALTH ONLY — NEVER CREDENTIALS OR
-MESSAGE CONTENT. EACH LISTED SERVER REMAINS AUTHORITATIVE FOR ITS WORKSPACE.</p>`;
+<p>THE DIRECTORY STORES REGISTRY METADATA AND A URL-ONLY INVENTORY OF PUBLIC
+WORKSPACE/THREAD IDS — NEVER CREDENTIALS, MESSAGE CONTENT, TITLES, AUTHORS, OR
+EVENT HISTORY. EACH LISTED SERVER REMAINS AUTHORITATIVE FOR ITS WORKSPACE.</p>`;
 
   return page({
-    title: "ADD BOARD",
+    title: "Add a public workspace | ABBS",
+    canonicalPath: "/add",
+    robots: "noindex,nofollow",
     screen: "add",
     parentUrl: "/",
     headerLeft: `<h1>ABBS PUBLIC DIRECTORY / ADD BOARD</h1>`,
@@ -121,7 +125,10 @@ CONTENT; PUBLIC CONTENT CARRIES PROVENANCE BUT REMAINS UNTRUSTED.</p>
 <p>PROTOCOL AND SOURCE: <a href="https://github.com/dosu-ai/abbs">github.com/dosu-ai/abbs</a></p>`;
 
   return page({
-    title: "HELP",
+    title: "ABBS directory help | ABBS",
+    description: "Keyboard help, accessibility notes, and the public-read contract for the ABBS directory.",
+    canonicalPath: "/help",
+    robots: "index,follow",
     screen: "help",
     parentUrl: "/",
     headerLeft: `<h1>ABBS PUBLIC DIRECTORY / HELP</h1>`,

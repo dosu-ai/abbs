@@ -2,12 +2,14 @@
 // and the short cache. All network is mocked; disableNetConnect() makes any
 // unexpected outbound request a test failure.
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RegistryWorkspace } from "../src/types";
 import {
   clearUpstreamCache,
   fetchDiscovery,
   fetchMessages,
+  fetchPublicThread,
+  fetchPublicThreads,
   fetchThread,
   fetchThreads,
   fetchUser,
@@ -30,6 +32,14 @@ function ws(over: Partial<RegistryWorkspace> = {}): RegistryWorkspace {
     lastCheckedAt: null,
     lastSuccessAt: null,
     lastErrorCode: null,
+    searchEligible: false,
+    searchSuccessCount: 0,
+    searchEligibleAt: null,
+    searchContentFound: false,
+    inventoryPhase: "bootstrap",
+    inventoryCursor: null,
+    inventoryAnchor: null,
+    inventoryCompletedAt: null,
     ...over,
   };
 }
@@ -41,6 +51,7 @@ beforeAll(() => {
 
 beforeEach(() => clearUpstreamCache());
 afterEach(() => {
+  vi.restoreAllMocks();
   fetchMock.assertNoPendingInterceptors();
   fetchMock.reset();
 });
@@ -113,6 +124,114 @@ describe("responses and typed errors", () => {
     const second = await fetchThreads(ws(), {}, true);
     expect(first.ok && first.fresh).toBe(true);
     expect(second.ok && second.fresh).toBe(true);
+  });
+
+  it("refresh probes do not populate persistent cache entries", async () => {
+    fetchMock
+      .get("https://up.example")
+      .intercept({ path: "/v1/threads" })
+      .reply(200, pageBody([threadBody()]), JSON_HEADERS);
+    const refresh = await fetchThreads(ws(), {}, true);
+    expect(refresh.ok && refresh.fresh).toBe(true);
+
+    fetchMock.get("https://up.example").intercept({ path: "/v1/threads" }).reply(503, "down");
+    const ordinary = await fetchThreads(ws(), {});
+    expect(ordinary.ok).toBe(false);
+  });
+
+  it("serves a successful response as visibly stale after a live failure", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    fetchMock
+      .get("https://up.example")
+      .intercept({ path: "/v1/threads" })
+      .reply(200, pageBody([threadBody()]), JSON_HEADERS);
+    const first = await fetchThreads(ws(), {});
+    expect(first.ok && first.stale).toBe(false);
+
+    clock.mockReturnValue(32_000);
+    fetchMock.get("https://up.example").intercept({ path: "/v1/threads" }).reply(503, "down");
+    const stale = await fetchThreads(ws(), {});
+    expect(stale.ok).toBe(true);
+    if (stale.ok) {
+      expect(stale.fresh).toBe(false);
+      expect(stale.stale).toBe(true);
+    }
+    clock.mockRestore();
+  });
+
+  it("never uses stale fallback for an explicit refresh or past the 15-minute cutoff", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    fetchMock
+      .get("https://up.example")
+      .intercept({ path: "/v1/threads" })
+      .reply(200, pageBody([threadBody()]), JSON_HEADERS);
+    await fetchThreads(ws(), {});
+
+    clock.mockReturnValue(32_000);
+    fetchMock.get("https://up.example").intercept({ path: "/v1/threads" }).reply(503, "down");
+    const refresh = await fetchThreads(ws(), {}, true);
+    expect(refresh.ok).toBe(false);
+
+    clearUpstreamCache();
+    clock.mockReturnValue(100_000);
+    fetchMock
+      .get("https://up.example")
+      .intercept({ path: "/v1/threads" })
+      .reply(200, pageBody([threadBody()]), JSON_HEADERS);
+    await fetchThreads(ws(), {});
+    clock.mockReturnValue(1_000_001);
+    fetchMock.get("https://up.example").intercept({ path: "/v1/threads" }).reply(503, "down");
+    const expired = await fetchThreads(ws(), {});
+    expect(expired.ok).toBe(false);
+    clock.mockRestore();
+  });
+
+  it("never uses stale content after a deterministic authorization failure", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    fetchMock
+      .get("https://up.example")
+      .intercept({ path: "/v1/threads" })
+      .reply(200, pageBody([threadBody()]), JSON_HEADERS);
+    await fetchThreads(ws(), {});
+
+    clock.mockReturnValue(32_000);
+    fetchMock.get("https://up.example").intercept({ path: "/v1/threads" }).reply(401, "private");
+    const result = await fetchThreads(ws(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("http-4xx");
+    clock.mockRestore();
+  });
+
+  it("privacy-safe render wrappers reject non-public anonymous thread data", async () => {
+    fetchMock
+      .get("https://up.example")
+      .intercept({ path: "/v1/threads" })
+      .reply(200, pageBody([threadBody({ kind: "dm" })]), JSON_HEADERS);
+    const list = await fetchPublicThreads(ws(), {});
+    expect(list.ok).toBe(false);
+    if (!list.ok) expect(list.code).toBe("not-public");
+
+    fetchMock
+      .get("https://up.example")
+      .intercept({ path: `/v1/threads/${THREAD_ID}` })
+      .reply(200, JSON.stringify(threadBody({ kind: "dm" })), JSON_HEADERS);
+    const detail = await fetchPublicThread(ws({ id: "another-cache-key" }), THREAD_ID);
+    expect(detail.ok).toBe(false);
+    if (!detail.ok) expect(detail.code).toBe("not-public");
+  });
+
+  it("bypasses surviving cache entries after D1 records a privacy failure", async () => {
+    fetchMock
+      .get("https://up.example")
+      .intercept({ path: "/v1/threads" })
+      .reply(200, pageBody([threadBody()]), JSON_HEADERS);
+    await fetchPublicThreads(ws(), {});
+
+    // There is deliberately no second interceptor. Returning the cached page
+    // would succeed; going live proves the D1 privacy gate won.
+    const result = await fetchPublicThreads(ws({ lastErrorCode: "not-public" }), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("network");
   });
 
   it("maps upstream 404 to not-found", async () => {

@@ -27,6 +27,7 @@ import { problemResponse } from "./problems";
 import { apiRegisterWorkspace, formRegisterWorkspace } from "./register";
 import { runVerificationSweep } from "./verify";
 import type { Env } from "./types";
+import { sitemapIndex, siteSitemap, workspaceSitemap } from "./sitemap";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -80,6 +81,16 @@ async function handle(request: Request, env: Env): Promise<Response> {
   }
 
   // HTML screens.
+  if (segs.length === 1 && segs[0] === "sitemap.xml") return sitemapIndex(env);
+  if (segs.length === 2 && segs[0] === "sitemaps" && segs[1] === "site.xml") {
+    return siteSitemap();
+  }
+  if (segs.length === 4 && segs[0] === "sitemaps" && segs[1] === "w") {
+    const match = /^(\d+)\.xml$/.exec(segs[3]);
+    if (SLUG_RE.test(segs[2]) && match !== null) {
+      return workspaceSitemap(env, segs[2], Number(match[1]));
+    }
+  }
   if (segs.length === 0) return directoryPage(env, url, refresh);
   if (segs.length === 1 && segs[0] === "add") return addPage();
   if (segs.length === 1 && segs[0] === "help") return helpPage();
@@ -117,17 +128,64 @@ async function handle(request: Request, env: Env): Promise<Response> {
     : notFoundPage();
 }
 
+async function etagFor(body: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
+  const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `"${hex}"`;
+}
+
+function etagMatches(header: string | null, etag: string): boolean {
+  if (header === null) return false;
+  return header
+    .split(",")
+    .map((value) => value.trim().replace(/^W\//, ""))
+    .some((value) => value === "*" || value === etag);
+}
+
+async function finalizeResponse(request: Request, response: Response): Promise<Response> {
+  const url = new URL(request.url);
+  const headers = new Headers(response.headers);
+  if (apiPath(url.pathname) || response.status >= 400) {
+    headers.set("X-Robots-Tag", "noindex,nofollow");
+  }
+
+  const contentType = headers.get("Content-Type") ?? "";
+  if (response.status === 200 && contentType.startsWith("text/html")) {
+    const body = await response.text();
+    const etag = await etagFor(body);
+    headers.set("ETag", etag);
+    if (etagMatches(request.headers.get("If-None-Match"), etag)) {
+      return new Response(null, { status: 304, headers });
+    }
+    return new Response(request.method === "HEAD" ? null : body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
+  if (request.method === "HEAD") {
+    return new Response(null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     try {
       const resp = await handle(request, env);
-      if (request.method === "HEAD") {
-        return new Response(null, resp);
-      }
-      return resp;
+      return finalizeResponse(request, resp);
     } catch (e) {
       console.error("unhandled", e);
-      return problemResponse(500, "internal", "internal error");
+      return finalizeResponse(request, problemResponse(500, "internal", "internal error"));
     }
   },
 
