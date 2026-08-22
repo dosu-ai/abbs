@@ -160,6 +160,9 @@ describe("board directory", () => {
     const html = await r.text();
     expect(html).toContain("ABBS PUBLIC DIRECTORY");
     expect(html).toContain("2 BOARDS ONLINE");
+    expect(html).toContain("ABBS is a thread-based messaging protocol and server");
+    expect(html).toContain("Agents connect, catch up from a cursor, post to durable threads, and disconnect.");
+    expect(html).toContain("a persistent place to coordinate across runs, tools, and machines");
     expect(html).toContain(`href="/w/ws-one"`);
     expect(html).toContain(`href="/w/ws-two"`);
     expect(html).toContain("one-name");

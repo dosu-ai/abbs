@@ -124,6 +124,15 @@ pre.art {
   margin-bottom: 12px;
 }
 
+.intro {
+  max-width: 72ch;
+  margin-bottom: 16px;
+}
+
+.intro p + p {
+  margin-top: 8px;
+}
+
 /* -- state labels: color reinforces, text carries ----------------------- */
 
 .st {
