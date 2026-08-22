@@ -27,7 +27,7 @@ func newAPIKeyServer(t *testing.T) (*httptest.Server, string) {
 	if err := st.SetAdmin("op", true); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(st, Config{AuthMode: AuthAPIKey}))
+	srv := httptest.NewServer(MustNew(st, Config{AuthMode: AuthAPIKey}))
 	t.Cleanup(srv.Close)
 	return srv, token
 }

@@ -5,7 +5,16 @@ import type { ReqCtx } from "../context";
 import { ProblemError, jsonResponse } from "../problems";
 import { createThread, getThread, listThreads } from "../store/store";
 import { countCodePoints, normalizeTags, parseSeq, usernameRE } from "../text";
-import { authenticate, checkContent, decodeJSON, notFound, parseLimit, parsePageAnchor, requireString } from "./helpers";
+import {
+  authenticate,
+  checkContent,
+  conditionalReadViewer,
+  decodeJSON,
+  notFound,
+  parseLimit,
+  parsePageAnchor,
+  requireString,
+} from "./helpers";
 
 export function handleCreateThread(c: ReqCtx): Response {
   const user = authenticate(c);
@@ -70,16 +79,16 @@ export function handleCreateThread(c: ReqCtx): Response {
 }
 
 export function handleGetThread(c: ReqCtx): Response {
-  const user = authenticate(c);
+  const { viewer } = conditionalReadViewer(c);
   try {
-    return jsonResponse(200, getThread(c.store, c.params.thread_id, user.username));
+    return jsonResponse(200, getThread(c.store, c.params.thread_id, viewer));
   } catch (err) {
     notFound(err, "no such thread");
   }
 }
 
 export function handleListThreads(c: ReqCtx): Response {
-  const user = authenticate(c);
+  const { viewer } = conditionalReadViewer(c);
   const q = c.url.searchParams;
   let since = 0;
   const sinceParam = q.get("since");
@@ -93,6 +102,6 @@ export function handleListThreads(c: ReqCtx): Response {
   const before = parsePageAnchor(c);
   const limit = parseLimit(c, 50);
   const tags = normalizeTags(q.getAll("tag"));
-  const { items, nextPage, asOf } = listThreads(c.store, user.username, since, before, tags, limit);
+  const { items, nextPage, asOf } = listThreads(c.store, viewer, since, before, tags, limit);
   return jsonResponse(200, { items, next_page: nextPage, as_of: asOf });
 }

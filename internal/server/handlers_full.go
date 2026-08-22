@@ -48,12 +48,19 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authenticate(w, r); !ok {
+	_, authenticated, ok := s.conditionalReadViewer(w, r)
+	if !ok {
 		return
 	}
 	user, err := s.store.GetUser(r.PathValue("username"))
 	if err != nil {
 		mapStoreError(w, err)
+		return
+	}
+	if authenticated == nil {
+		writeJSON(w, http.StatusOK, api.PublicUser{
+			Username: user.Username, Kind: user.Kind, DisplayName: user.DisplayName,
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, user)
@@ -215,7 +222,7 @@ func (s *Server) handleRemoveReaction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authenticate(w, r)
+	viewer, _, ok := s.conditionalReadViewer(w, r)
 	if !ok {
 		return
 	}
@@ -223,7 +230,7 @@ func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, nextPage, asOf, err := s.store.ListTags(user.Username, r.URL.Query().Get("page"), limit)
+	items, nextPage, asOf, err := s.store.ListTags(viewer, r.URL.Query().Get("page"), limit)
 	if err != nil {
 		mapStoreError(w, err)
 		return

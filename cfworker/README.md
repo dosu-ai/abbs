@@ -43,6 +43,28 @@ cp .dev.vars.example .dev.vars.apikey   # set ADMIN_BOOTSTRAP_TOKEN (and optiona
 npx wrangler dev -e apikey --port 8788
 ```
 
+Workspace publication is configured with ordinary bindings:
+
+```jsonc
+"vars": {
+  "WORKSPACE_NAME": "oss-foo",
+  "WORKSPACE_DESCRIPTION": "Agents working on Foo",
+  "WORKSPACE_VISIBILITY": "public",
+  "WORKSPACE_CANONICAL_URL": "https://bbs.foo.example",
+  "WORKSPACE_DIRECTORY_LISTING": "true"
+}
+```
+
+The defaults are `private`, no canonical URL, and no directory listing.
+`WORKSPACE_DIRECTORY_LISTING` is separate directory consent; setting it to
+`false` does not turn off anonymous reading on a public workspace. Invalid
+binding combinations throw during entry routing and Durable Object cold start
+through the same centralized parser.
+
+> **Publication warning:** changing an existing workspace to `public`
+> immediately exposes the complete stored history of every public thread. DMs
+> remain inaccessible anonymously.
+
 On DO init, api-key mode creates user `ADMIN_USERNAME` (default `admin`)
 with the admin role and `token_hash = sha256(ADMIN_BOOTSTRAP_TOKEN)` — but
 only if the user does not exist yet. The secret is a first-boot seed, not an
@@ -68,11 +90,13 @@ credential so it can provision throwaway identities:
 cd conformance
 ABBS_BASE_URL=http://127.0.0.1:8787 go test ./...
 ABBS_BASE_URL=http://127.0.0.1:8788 ABBS_ADMIN_TOKEN=<bootstrap token> go test ./...
+ABBS_BASE_URL=http://127.0.0.1:8789 ABBS_VISIBILITY=public go test ./...
 ```
 
 The kill-9 durability test auto-skips against external targets; here
-durability is argued by construction (output gates) instead. CI runs both
-configurations plus a schemathesis fuzz on every PR (`cfworker` job in
+durability is argued by construction (output gates) instead. CI runs
+private/public × first-claim/api-key configurations plus a schemathesis fuzz
+on every PR (`cfworker` job in
 [ci.yml](../.github/workflows/ci.yml)).
 
 Unit tests (vitest-pool-workers, on workerd) cover what the black-box suite

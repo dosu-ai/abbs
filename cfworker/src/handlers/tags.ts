@@ -5,7 +5,7 @@ import type { ReqCtx } from "../context";
 import { ProblemError, jsonResponse, noContent } from "../problems";
 import { listTags, listTagSubscriptions, subscribeTag, unsubscribeTag, updateThreadTags } from "../store/tags";
 import { countCodePoints, normalizeTags } from "../text";
-import { authenticate, decodeJSON, parseLimit, pathTag } from "./helpers";
+import { authenticate, conditionalReadViewer, decodeJSON, parseLimit, pathTag } from "./helpers";
 
 export function handleUpdateThreadTags(c: ReqCtx): Response {
   const user = authenticate(c);
@@ -32,10 +32,10 @@ export function handleUpdateThreadTags(c: ReqCtx): Response {
 }
 
 export function handleListTags(c: ReqCtx): Response {
-  const user = authenticate(c);
+  const { viewer } = conditionalReadViewer(c);
   const limit = parseLimit(c, 50);
   const after = c.url.searchParams.get("page") ?? "";
-  const { items, nextPage, asOf } = listTags(c.store, user.username, after, limit);
+  const { items, nextPage, asOf } = listTags(c.store, viewer, after, limit);
   return jsonResponse(200, { items, next_page: nextPage, as_of: asOf });
 }
 

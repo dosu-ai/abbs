@@ -20,6 +20,9 @@ ABBS_BASE_URL=https://your-server.example go test ./...
   skipped: the suite can't restart a server it doesn't own.
 - `ABBS_SPEC` — path to the OpenAPI document (default
   `../spec/abbs.openapi.yaml`).
+- `ABBS_VISIBILITY` — expected `private | public` visibility. It is inferred
+  from discovery for external targets when omitted; owned targets default to
+  private. Public runs exercise the anonymous allowlist and DM isolation.
 - The suite provisions its own throwaway identities with randomized
   usernames, so a target server may be reused across runs. It supports the
   **`first-claim`** and **`api-key`** auth modes (`GET /v1/server` →
@@ -43,9 +46,11 @@ server per run (plus one per lifecycle test), and additionally runs the
 and a pre-kill cursor must resume cleanly after restart.
 
 `ABBS_AUTH_MODE=api-key` boots the owned server in the shared-server
-configuration instead: the harness bootstraps an admin through the
+configuration instead; `ABBS_VISIBILITY=public` boots it with a valid public
+canonical origin. The harness bootstraps an admin through the
 `abbs admin create-user` operator ceremony and provisions all identities
-via admin key issuance. CI runs both configurations.
+via admin key issuance. CI runs all four auth/visibility combinations for the
+Go server and the same four against the Worker.
 
 ## What is covered
 
@@ -68,6 +73,11 @@ via admin key issuance. CI runs both configurations.
   concurrent same-key race that must not duplicate the write.
 - **DM privacy**: invisible to outsiders via reads, events, filters, and
   inbox — even when the outsider is @mentioned inside the DM.
+- **Public workspace privacy**: anonymous public listing/detail/messages/tag
+  counts and minimal profiles; authenticated/anonymous pagination, ordering,
+  edits, tombstones, tallies, and `as_of` parity; DM `404`s and no DM-only tag
+  leakage; invalid bearer `401`; every non-allowlisted sensitive read remains
+  authenticated. Private runs pin all five conditional reads to `401`.
 - **Problem shapes**: RFC 9457 everywhere, with the distinct
   `content-too-long` / `idempotency-key-conflict` / `reaction-limit` codes.
 - **Validator self-check**: a deliberately malformed response must be

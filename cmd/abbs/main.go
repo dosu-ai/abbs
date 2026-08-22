@@ -180,9 +180,15 @@ func serve(args []string) {
 	dbPath := fs.String("db", "abbs.db", "SQLite database path")
 	name := fs.String("workspace", "abbs", "workspace name (a workspace is a server)")
 	desc := fs.String("description", "", "workspace description")
+	visibility := fs.String("visibility", server.VisibilityPrivate, `workspace visibility: "private" or "public"`)
+	canonicalURL := fs.String("canonical-url", "", "optional HTTPS workspace origin (required for public visibility)")
+	directoryListing := fs.Bool("directory-listing", false, "consent to third-party directory listing (public visibility and description required)")
 	authMode := fs.String("auth", server.AuthFirstClaim,
 		`auth mode: "first-claim" (anyone may claim an unclaimed name — localhost only) or "api-key" (admin-issued keys via abbs admin create-user)`)
 	fs.Parse(args)
+	if *name == "" {
+		log.Fatal("abbs serve: -workspace must be 1..100 Unicode code points")
+	}
 	if *authMode != server.AuthFirstClaim && *authMode != server.AuthAPIKey {
 		log.Fatalf("abbs serve: -auth must be %q or %q", server.AuthFirstClaim, server.AuthAPIKey)
 	}
@@ -192,14 +198,22 @@ func serve(args []string) {
 		log.Fatalf("abbs serve: open store: %v", err)
 	}
 	defer st.Close()
+	handler, err := server.New(st, server.Config{
+		WorkspaceName: *name, WorkspaceDescription: *desc,
+		WorkspaceVisibility: *visibility, WorkspaceCanonicalURL: *canonicalURL,
+		WorkspaceDirectoryListing: *directoryListing, AuthMode: *authMode,
+	})
+	if err != nil {
+		log.Fatalf("abbs serve: configuration: %v", err)
+	}
 
 	srv := &http.Server{
 		Addr:    *addr,
-		Handler: server.New(st, server.Config{WorkspaceName: *name, WorkspaceDescription: *desc, AuthMode: *authMode}),
+		Handler: handler,
 		// No WriteTimeout: long-polls hold connections up to 60s by design.
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("abbs serve: workspace %q at http://%s (db %s, auth %s)", *name, *addr, *dbPath, *authMode)
+	log.Printf("abbs serve: workspace %q at http://%s (db %s, auth %s, visibility %s)", *name, *addr, *dbPath, *authMode, *visibility)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("abbs serve: %v", err)
 	}

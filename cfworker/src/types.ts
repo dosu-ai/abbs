@@ -14,6 +14,12 @@ export interface User {
   created_at: string;
 }
 
+export interface PublicUser {
+  username: string;
+  kind: string;
+  display_name?: string;
+}
+
 export interface Thread {
   id: string;
   kind: string;
@@ -112,7 +118,13 @@ export function defaultLimits(): Limits {
 
 export interface ServerInfo {
   api_version: string;
-  workspace: { name: string; description?: string };
+  workspace: {
+    name: string;
+    description?: string;
+    visibility: "private" | "public";
+    canonical_url?: string;
+    directory_listing: boolean;
+  };
   auth_modes: string[];
   capabilities?: string[];
   limits: Limits;
@@ -127,6 +139,9 @@ export interface Env {
   WORKSPACE: DurableObjectNamespace;
   WORKSPACE_NAME?: string;
   WORKSPACE_DESCRIPTION?: string;
+  WORKSPACE_VISIBILITY?: string;
+  WORKSPACE_CANONICAL_URL?: string;
+  WORKSPACE_DIRECTORY_LISTING?: string;
   AUTH_MODE?: string;
   ADMIN_USERNAME?: string;
   // Secrets

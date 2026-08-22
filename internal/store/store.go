@@ -148,6 +148,22 @@ type Store struct {
 	wakeup *broadcast
 }
 
+// ReadViewer is the authorization slice applied by storage read methods.
+// Authenticated viewers see every public thread plus DMs they participate in;
+// anonymous viewers see public threads only. Keeping this distinction in the
+// store prevents a handler from accidentally representing the internet as a
+// synthetic username with user-scoped state.
+type ReadViewer struct {
+	username      string
+	authenticated bool
+}
+
+func AuthenticatedViewer(username string) ReadViewer {
+	return ReadViewer{username: username, authenticated: true}
+}
+
+func AnonymousViewer() ReadViewer { return ReadViewer{} }
+
 func Open(path string) (*Store, error) {
 	// WAL for concurrent readers during writes; synchronous=FULL so a
 	// kill -9 never loses an acknowledged write (the M2 exit criterion).
@@ -459,7 +475,7 @@ func (s *Store) CreateThread(creator, title, content string, tags, participants 
 // GetThread returns a thread if the viewer may see it. DM threads are
 // invisible to non-participants: ErrNotFound, never a 403 — existence is
 // not leaked.
-func (s *Store) GetThread(id, viewer string) (api.Thread, error) {
+func (s *Store) GetThread(id string, viewer ReadViewer) (api.Thread, error) {
 	return getThread(s.db, id, viewer)
 }
 
@@ -507,19 +523,22 @@ func loadParticipants(q querier, threadID string) ([]string, error) {
 	return out, rows.Err()
 }
 
-func getThread(q querier, id, viewer string) (api.Thread, error) {
+func getThread(q querier, id string, viewer ReadViewer) (api.Thread, error) {
 	t, err := scanThread(q.QueryRow(
 		`SELECT id, kind, title, tags, creator, created_at, created_seq, last_activity_seq FROM threads WHERE id = ?`, id))
 	if err != nil {
 		return api.Thread{}, err
 	}
 	if t.Kind == "dm" {
+		if !viewer.authenticated {
+			return api.Thread{}, ErrNotFound
+		}
 		if t.Participants, err = loadParticipants(q, id); err != nil {
 			return api.Thread{}, err
 		}
 		member := false
 		for _, p := range t.Participants {
-			member = member || p == viewer
+			member = member || p == viewer.username
 		}
 		if !member {
 			return api.Thread{}, ErrNotFound
@@ -539,7 +558,7 @@ func (s *Store) PostMessage(threadID, author, content string, at time.Time) (api
 	}
 	defer tx.Rollback()
 
-	if _, err := getThread(tx, threadID, author); err != nil {
+	if _, err := getThread(tx, threadID, AuthenticatedViewer(author)); err != nil {
 		return api.Message{}, err
 	}
 
@@ -594,7 +613,7 @@ func (s *Store) PostMessage(threadID, author, content string, at time.Time) (api
 // ListMessages pages through a thread's messages in creation order. after
 // is the created_seq page anchor (0 = from the start); nextPage is the
 // anchor for the following page, nil on the last one.
-func (s *Store) ListMessages(threadID, viewer string, after int64, limit int) (items []api.Message, nextPage *string, asOf string, err error) {
+func (s *Store) ListMessages(threadID string, viewer ReadViewer, after int64, limit int) (items []api.Message, nextPage *string, asOf string, err error) {
 	if _, err := s.GetThread(threadID, viewer); err != nil {
 		return nil, nil, "", err
 	}
@@ -683,16 +702,21 @@ func tallies(q querier, messageID string) ([]api.ReactionTally, error) {
 // ListThreads pages through the viewer's visible threads, most recent
 // activity first. since=0 means no lower bound; before=0 (the page anchor)
 // means start from the top; tags narrows to threads carrying any of them.
-func (s *Store) ListThreads(viewer string, since, before int64, tags []string, limit int) (items []api.Thread, nextPage *string, asOf string, err error) {
+func (s *Store) ListThreads(viewer ReadViewer, since, before int64, tags []string, limit int) (items []api.Thread, nextPage *string, asOf string, err error) {
 	cur, err := s.CurrentSeq()
 	if err != nil {
 		return nil, nil, "", err
 	}
 	asOf = seqToken(cur)
 
-	query := `SELECT id, kind, title, tags, creator, created_at, created_seq, last_activity_seq FROM threads t
-		 WHERE (t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))`
-	args := []any{viewer}
+	query := `SELECT id, kind, title, tags, creator, created_at, created_seq, last_activity_seq FROM threads t WHERE `
+	args := []any{}
+	if viewer.authenticated {
+		query += `(t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))`
+		args = append(args, viewer.username)
+	} else {
+		query += `t.kind = 'public'`
+	}
 	if since > 0 {
 		query += ` AND t.last_activity_seq > ?`
 		args = append(args, since)
@@ -853,7 +877,7 @@ func (s *Store) Inbox(viewer string, before int64, limit int) (items []api.Inbox
 // GetReadCursor returns the viewer's read cursor for a visible thread, nil
 // when never set.
 func (s *Store) GetReadCursor(threadID, viewer string) (*int64, error) {
-	if _, err := s.GetThread(threadID, viewer); err != nil {
+	if _, err := s.GetThread(threadID, AuthenticatedViewer(viewer)); err != nil {
 		return nil, err
 	}
 	var seq int64
@@ -877,7 +901,7 @@ func (s *Store) SetReadCursor(threadID, viewer string, seq int64) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := getThread(tx, threadID, viewer); err != nil {
+	if _, err := getThread(tx, threadID, AuthenticatedViewer(viewer)); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(

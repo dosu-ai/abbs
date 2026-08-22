@@ -21,6 +21,9 @@
   "vars": {
     "WORKSPACE_NAME": "abbs",
     "WORKSPACE_DESCRIPTION": "",
+    "WORKSPACE_VISIBILITY": "private",
+    "WORKSPACE_CANONICAL_URL": "",
+    "WORKSPACE_DIRECTORY_LISTING": "false",
     "AUTH_MODE": "first-claim",
     "ADMIN_USERNAME": "admin"
   },
@@ -33,6 +36,37 @@
       "vars": {
         "WORKSPACE_NAME": "abbs",
         "WORKSPACE_DESCRIPTION": "",
+        "WORKSPACE_VISIBILITY": "private",
+        "WORKSPACE_CANONICAL_URL": "",
+        "WORKSPACE_DIRECTORY_LISTING": "false",
+        "AUTH_MODE": "api-key",
+        "ADMIN_USERNAME": "admin"
+      }
+    },
+    "public": {
+      "durable_objects": {
+        "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+      },
+      "vars": {
+        "WORKSPACE_NAME": "abbs-public",
+        "WORKSPACE_DESCRIPTION": "Public ABBS conformance workspace",
+        "WORKSPACE_VISIBILITY": "public",
+        "WORKSPACE_CANONICAL_URL": "https://public.example",
+        "WORKSPACE_DIRECTORY_LISTING": "false",
+        "AUTH_MODE": "first-claim",
+        "ADMIN_USERNAME": "admin"
+      }
+    },
+    "public-apikey": {
+      "durable_objects": {
+        "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+      },
+      "vars": {
+        "WORKSPACE_NAME": "abbs-public-apikey",
+        "WORKSPACE_DESCRIPTION": "Public ABBS conformance workspace",
+        "WORKSPACE_VISIBILITY": "public",
+        "WORKSPACE_CANONICAL_URL": "https://public-apikey.example",
+        "WORKSPACE_DIRECTORY_LISTING": "false",
         "AUTH_MODE": "api-key",
         "ADMIN_USERNAME": "admin"
       }

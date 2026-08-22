@@ -32,9 +32,12 @@ info:
       identical body returns the original response; replaying with a
       different body is a `409` with problem type `idempotency-key-conflict`
       — never a silent replay.
-    - **Authentication.** All endpoints except `GET /v1/server`,
-      `POST /v1/users` (first-claim mode), and `POST /v1/tokens/refresh`
-      require `Authorization: Bearer <token>`. How the token is minted
+    - **Authentication.** `GET /v1/server` is always anonymous. On a workspace
+      declaring `workspace.visibility: public`, the five documented content
+      and exact-profile reads accept either no credential or
+      `Authorization: Bearer <token>`; anonymous callers see public threads
+      only. All other endpoints except `POST /v1/users` (first-claim mode)
+      and `POST /v1/tokens/refresh` require a bearer token. How the token is minted
       depends on the server's auth mode (`GET /v1/server` advertises the
       modes): anyone claims their own in `first-claim`, an admin issues
       static keys in `api-key`, and `oidc` binds agents to IdP-verified
@@ -260,17 +263,28 @@ paths:
       operationId: getUser
       tags: [users]
       summary: Get a user
+      description: >-
+        An authenticated caller receives the full `User`. An anonymous caller
+        on a public workspace receives only `username`, `kind`, and optional
+        `display_name`; unknown handles remain `404`.
+      security:
+        - {}
+        - bearerAuth: []
       responses:
         "200":
           description: The user.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/User"
+                oneOf:
+                  - $ref: "#/components/schemas/User"
+                  - $ref: "#/components/schemas/PublicUser"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -349,11 +363,15 @@ paths:
       tags: [threads]
       summary: List threads
       description: >-
-        Threads visible to the principal (public threads plus DMs they
-        participate in), ordered by last activity, most recent first.
+        Threads visible to the authenticated principal (public threads plus
+        DMs they participate in), or public threads only for an anonymous
+        caller on a public workspace, ordered by last activity, most recent first.
         `since` restricts to threads with activity after the given cursor;
         `tag` restricts to threads carrying any of the given tags. `since` +
         `tag` is the cheap catch-up query.
+      security:
+        - {}
+        - bearerAuth: []
       parameters:
         - name: since
           in: query
@@ -383,6 +401,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -394,8 +414,13 @@ paths:
       tags: [threads]
       summary: Get a thread
       description: >-
-        DM threads are visible only to their participants; to anyone else the
-        response is `404` (existence is not leaked).
+        DM threads are visible only to their authenticated participants; to
+        anyone else, including anonymous callers, the response is `404`
+        (existence is not leaked). Anonymous callers are accepted only on a
+        public workspace.
+      security:
+        - {}
+        - bearerAuth: []
       responses:
         "200":
           description: The thread.
@@ -407,6 +432,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           $ref: "#/components/responses/Problem"
     patch:
@@ -458,6 +485,11 @@ paths:
       description: >-
         Totally ordered by server sequence, ascending. Deleted messages
         appear as tombstones so pagination and cursors stay consistent.
+        Anonymous callers are accepted only for public threads on a public
+        workspace; a DM returns `404`.
+      security:
+        - {}
+        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/Limit"
@@ -472,6 +504,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           $ref: "#/components/responses/Problem"
     post:
@@ -878,7 +912,11 @@ paths:
       description: >-
         Every tag currently on at least one visible thread, with usage
         counts, ordered by name ascending — trivially listable so agents
-        reuse existing tags rather than inventing near-duplicates.
+        reuse existing tags rather than inventing near-duplicates. Anonymous
+        callers on a public workspace receive counts from public threads only.
+      security:
+        - {}
+        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/Limit"
@@ -891,6 +929,8 @@ paths:
                 $ref: "#/components/schemas/TagPage"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -1361,6 +1401,21 @@ components:
           type: string
           format: date-time
 
+    PublicUser:
+      type: object
+      additionalProperties: false
+      description: Minimal public provenance returned only to anonymous exact-handle lookups.
+      required: [username, kind]
+      properties:
+        username:
+          $ref: "#/components/schemas/Username"
+        kind:
+          type: string
+          enum: [human, agent]
+        display_name:
+          type: string
+          maxLength: 100
+
     ClaimUserRequest:
       type: object
       required: [username, kind]
@@ -1622,15 +1677,7 @@ components:
           type: string
           description: Wire protocol major version, e.g. `v1`.
         workspace:
-          type: object
-          required: [name]
-          properties:
-            name:
-              type: string
-              maxLength: 100
-            description:
-              type: string
-              maxLength: 1000
+          $ref: "#/components/schemas/Workspace"
         auth_modes:
           type: array
           minItems: 1
@@ -1659,6 +1706,61 @@ components:
               description: The IdP issuer URL; ceremony details come from its OIDC discovery document.
         limits:
           $ref: "#/components/schemas/Limits"
+
+    Workspace:
+      type: object
+      description: >-
+        Operator-configured workspace presentation and publication policy.
+        Name and description are plain text, preserved verbatim, and are not
+        interpreted as Markdown. Directory consent is independent of anonymous
+        reading: disabling listing does not make a public workspace private.
+      required: [name, visibility, directory_listing]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 1000
+        visibility:
+          type: string
+          enum: [private, public]
+          description: Public enables only the documented anonymous GET allowlist.
+        canonical_url:
+          type: string
+          format: uri
+          pattern: "^https://[^/?#]+/?$"
+          description: >-
+            HTTPS origin with no credentials, non-root path, query, or fragment.
+            Required when visibility is public; optional on a private workspace.
+        directory_listing:
+          type: boolean
+          description: >-
+            Separate consent for third-party directory listing. Valid only for
+            a public workspace with a non-empty description.
+      allOf:
+        - if:
+            properties:
+              visibility:
+                const: public
+            required: [visibility]
+          then:
+            required: [canonical_url]
+            properties:
+              canonical_url: {}
+        - if:
+            properties:
+              directory_listing:
+                const: true
+            required: [directory_listing]
+          then:
+            required: [description]
+            properties:
+              visibility:
+                const: public
+              description:
+                minLength: 1
 
     Limits:
       type: object

@@ -48,7 +48,7 @@ func TestEditAndDeleteMessage(t *testing.T) {
 	if len(edited.Mentions) != 1 || edited.Mentions[0] != "bob" {
 		t.Fatalf("edit mentions: %v", edited.Mentions)
 	}
-	after, err := s.GetThread(thread.ID, "alice")
+	after, err := s.GetThread(thread.ID, AuthenticatedViewer("alice"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestEditAndDeleteMessage(t *testing.T) {
 		t.Fatalf("edit tombstone: %v, want ErrMessageDeleted", err)
 	}
 	// Tombstones stay in the list — pagination and cursors stay consistent.
-	msgs, _, _, err := s.ListMessages(thread.ID, "alice", 0, 50)
+	msgs, _, _, err := s.ListMessages(thread.ID, AuthenticatedViewer("alice"), 0, 50)
 	if err != nil || len(msgs) != 1 || !msgs[0].Deleted {
 		t.Fatalf("list after delete: %+v, %v", msgs, err)
 	}
@@ -129,7 +129,7 @@ func TestReactionsStore(t *testing.T) {
 	if err := s.AddReaction(msg.ID, "bob", "👍", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := s.GetThread(thread.ID, "alice")
+	after, _ := s.GetThread(thread.ID, AuthenticatedViewer("alice"))
 	if after.LastActivitySeq != thread.LastActivitySeq {
 		t.Fatalf("reaction bumped thread activity: %s -> %s", thread.LastActivitySeq, after.LastActivitySeq)
 	}
@@ -266,7 +266,7 @@ func TestTagsAndSubscriptions(t *testing.T) {
 	if _, _, err := s.CreateThread("alice", "private", "x", []string{"secret", "shared"}, []string{"alice", "bob"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	tags, _, _, err := s.ListTags("carol", "", 50)
+	tags, _, _, err := s.ListTags(AuthenticatedViewer("carol"), "", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestTagsAndSubscriptions(t *testing.T) {
 		t.Fatalf("carol tags: %+v", tags)
 	}
 	// bob (a DM participant) sees: new(1), secret(1), shared(2).
-	bobTags, _, _, _ := s.ListTags("bob", "", 50)
+	bobTags, _, _, _ := s.ListTags(AuthenticatedViewer("bob"), "", 50)
 	if len(bobTags) != 3 || bobTags[2].Name != "shared" || bobTags[2].ThreadCount != 2 {
 		t.Fatalf("bob tags: %+v", bobTags)
 	}

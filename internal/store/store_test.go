@@ -95,10 +95,10 @@ func TestDMVisibility(t *testing.T) {
 		t.Fatalf("create dm: %v", err)
 	}
 
-	if _, err := s.GetThread(dm.ID, "carol"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.GetThread(dm.ID, AuthenticatedViewer("carol")); !errors.Is(err, ErrNotFound) {
 		t.Errorf("carol sees the DM: %v", err)
 	}
-	if _, err := s.GetThread(dm.ID, "bob"); err != nil {
+	if _, err := s.GetThread(dm.ID, AuthenticatedViewer("bob")); err != nil {
 		t.Errorf("bob cannot see the DM: %v", err)
 	}
 	if _, err := s.PostMessage(dm.ID, "carol", "let me in", time.Now()); !errors.Is(err, ErrNotFound) {
@@ -170,7 +170,7 @@ func TestDurabilityAcrossReopen(t *testing.T) {
 	if len(tail) != 1 || tail[0]["seq"] != msg.Seq {
 		t.Fatalf("resuming from pre-restart cursor: got %v, want just the new message", tail)
 	}
-	msgs, _, _, err := s2.ListMessages(thread.ID, "alice", 0, 50)
+	msgs, _, _, err := s2.ListMessages(thread.ID, AuthenticatedViewer("alice"), 0, 50)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestListThreads(t *testing.T) {
 	}
 
 	// Carol sees the two public threads, newest activity first, no DM.
-	items, _, _, err := s.ListThreads("carol", 0, 0, nil, 50)
+	items, _, _, err := s.ListThreads(AuthenticatedViewer("carol"), 0, 0, nil, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,32 +304,32 @@ func TestListThreads(t *testing.T) {
 		t.Fatalf("carol threads = %+v", items)
 	}
 	// Bob sees the DM too, with participants populated.
-	items, _, _, _ = s.ListThreads("bob", 0, 0, nil, 50)
+	items, _, _, _ = s.ListThreads(AuthenticatedViewer("bob"), 0, 0, nil, 50)
 	if len(items) != 3 || items[0].ID != dm.ID || len(items[0].Participants) != 2 {
 		t.Fatalf("bob threads = %+v", items)
 	}
 	// Tag filter is any-of.
-	items, _, _, _ = s.ListThreads("carol", 0, 0, []string{"go", "food"}, 50)
+	items, _, _, _ = s.ListThreads(AuthenticatedViewer("carol"), 0, 0, []string{"go", "food"}, 50)
 	if len(items) != 2 {
 		t.Fatalf("tag any-of = %+v", items)
 	}
-	items, _, _, _ = s.ListThreads("carol", 0, 0, []string{"dev"}, 50)
+	items, _, _, _ = s.ListThreads(AuthenticatedViewer("carol"), 0, 0, []string{"dev"}, 50)
 	if len(items) != 1 || items[0].ID != a.ID {
 		t.Fatalf("tag dev = %+v", items)
 	}
 	// since: only threads with activity after a's creation burst.
 	aSeq, _ := ParseSeq(a.LastActivitySeq)
-	items, _, _, _ = s.ListThreads("carol", aSeq, 0, nil, 50)
+	items, _, _, _ = s.ListThreads(AuthenticatedViewer("carol"), aSeq, 0, nil, 50)
 	if len(items) != 1 || items[0].ID != b.ID {
 		t.Fatalf("since = %+v", items)
 	}
 	// Pagination walks without overlap.
-	page1, next, _, _ := s.ListThreads("bob", 0, 0, nil, 2)
+	page1, next, _, _ := s.ListThreads(AuthenticatedViewer("bob"), 0, 0, nil, 2)
 	if next == nil || len(page1) != 2 {
 		t.Fatalf("page1 = %+v next = %v", page1, next)
 	}
 	anchor, _ := ParseSeq(*next)
-	page2, next2, _, _ := s.ListThreads("bob", 0, anchor, nil, 2)
+	page2, next2, _, _ := s.ListThreads(AuthenticatedViewer("bob"), 0, anchor, nil, 2)
 	if next2 != nil || len(page2) != 1 || page2[0].ID == page1[0].ID || page2[0].ID == page1[1].ID {
 		t.Fatalf("page2 = %+v next = %v", page2, next2)
 	}
@@ -351,7 +351,7 @@ func TestMessagePagination(t *testing.T) {
 	got := 0
 	after := int64(0)
 	for {
-		items, next, _, err := s.ListMessages(thread.ID, "alice", after, 2)
+		items, next, _, err := s.ListMessages(thread.ID, AuthenticatedViewer("alice"), after, 2)
 		if err != nil {
 			t.Fatal(err)
 		}

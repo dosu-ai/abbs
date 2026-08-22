@@ -30,6 +30,20 @@ export class UnknownParticipantErr extends Error {
 
 export type Row = Record<string, SqlStorageValue>;
 
+// Explicit read authorization slice. Anonymous internet readers are not a
+// synthetic principal and therefore cannot acquire user-scoped state.
+export type ReadViewer =
+  | { kind: "authenticated"; username: string }
+  | { kind: "anonymous" };
+
+export function authenticatedViewer(username: string): ReadViewer {
+  return { kind: "authenticated", username };
+}
+
+export function anonymousViewer(): ReadViewer {
+  return { kind: "anonymous" };
+}
+
 // Store wraps the DO's SQL storage. All methods are synchronous; every
 // mutation runs inside transactionSync (the analogue of the Go BEGIN…COMMIT
 // blocks) — output gates then hold the HTTP response until the write is
@@ -202,13 +216,14 @@ export function loadParticipants(s: Store, threadId: string): string[] {
 // getThread returns a thread if the viewer may see it. DM threads are
 // invisible to non-participants: not-found, never forbidden — existence is
 // not leaked.
-export function getThread(s: Store, id: string, viewer: string): Thread {
+export function getThread(s: Store, id: string, viewer: ReadViewer): Thread {
   const rows = s.sql.exec(`SELECT ${THREAD_COLS} FROM threads WHERE id = ?`, id).toArray();
   if (rows.length === 0) throw new StoreErr("not-found");
   const t = rowToThread(rows[0]);
   if (t.kind === "dm") {
+    if (viewer.kind === "anonymous") throw new StoreErr("not-found");
     t.participants = loadParticipants(s, id);
-    if (!t.participants.includes(viewer)) throw new StoreErr("not-found");
+    if (!t.participants.includes(viewer.username)) throw new StoreErr("not-found");
   }
   return t;
 }
@@ -312,7 +327,7 @@ export function createThread(
 // means start from the top; tags narrows to threads carrying any of them.
 export function listThreads(
   s: Store,
-  viewer: string,
+  viewer: ReadViewer,
   since: number,
   before: number,
   tags: string[],
@@ -320,9 +335,14 @@ export function listThreads(
 ): { items: Thread[]; nextPage: string | null; asOf: string } {
   const asOf = seqToken(currentSeq(s));
 
-  let query = `SELECT ${THREAD_COLS} FROM threads t
-	 WHERE (t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))`;
-  const args: unknown[] = [viewer];
+  let query = `SELECT ${THREAD_COLS} FROM threads t WHERE `;
+  const args: unknown[] = [];
+  if (viewer.kind === "authenticated") {
+    query += `(t.kind = 'public' OR EXISTS (SELECT 1 FROM thread_participants p WHERE p.thread_id = t.id AND p.username = ?))`;
+    args.push(viewer.username);
+  } else {
+    query += `t.kind = 'public'`;
+  }
   if (since > 0) {
     query += ` AND t.last_activity_seq > ?`;
     args.push(since);
@@ -440,7 +460,7 @@ export function inbox(
 // getReadCursor returns the viewer's read cursor for a visible thread, null
 // when never set.
 export function getReadCursor(s: Store, threadId: string, viewer: string): number | null {
-  getThread(s, threadId, viewer);
+  getThread(s, threadId, authenticatedViewer(viewer));
   const rows = s.sql
     .exec(`SELECT seq FROM read_cursors WHERE username = ? AND thread_id = ?`, viewer, threadId)
     .toArray();
@@ -451,7 +471,7 @@ export function getReadCursor(s: Store, threadId: string, viewer: string): numbe
 // absolute position — moving backward is allowed (marks things unread).
 export function setReadCursor(s: Store, threadId: string, viewer: string, seq: number): void {
   s.tx(() => {
-    getThread(s, threadId, viewer);
+    getThread(s, threadId, authenticatedViewer(viewer));
     s.sql.exec(
       `INSERT INTO read_cursors (username, thread_id, seq) VALUES (?, ?, ?)
 	 ON CONFLICT (username, thread_id) DO UPDATE SET seq = excluded.seq`,

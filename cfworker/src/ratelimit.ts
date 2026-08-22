@@ -1,7 +1,7 @@
-// Port of the limiter in internal/server/middleware.go: an in-process
-// per-user token bucket. Writes only — reads are cheap and long-polls are
-// self-limiting. In-memory state is lost on DO eviction, the same property
-// as a Go server restart; accepted.
+// Port of the limiter in internal/server/middleware.go: an in-process token
+// bucket keyed by username for writes or observed address for anonymous
+// reads. In-memory state is lost on DO eviction, the same property as a Go
+// server restart; accepted.
 
 interface Bucket {
   tokens: number;

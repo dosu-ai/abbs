@@ -247,7 +247,9 @@ func (h *Handler) discover(r *http.Request, name string, profiles map[string]wor
 		return nil, o, fmt.Errorf("GET /v1/server: %w", err)
 	}
 	o.ServerLabel = info.Workspace.Name
-	o.Description = info.Workspace.Description
+	if info.Workspace.Description != nil {
+		o.Description = *info.Workspace.Description
+	}
 	o.Capabilities = append([]string(nil), info.Capabilities...)
 	sort.Strings(o.Capabilities)
 	return c, o, nil

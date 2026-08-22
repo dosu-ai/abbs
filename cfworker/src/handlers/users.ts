@@ -7,7 +7,7 @@ import { AUTH_FIRST_CLAIM } from "../types";
 import { StoreErr } from "../store/store";
 import { claimUser, deactivateUser, getUser, listUsers } from "../store/users";
 import { countCodePoints, usernameRE } from "../text";
-import { authenticate, decodeJSON, parseLimit } from "./helpers";
+import { authenticate, conditionalReadViewer, decodeJSON, parseLimit } from "./helpers";
 
 export function handleClaimUser(c: ReqCtx): Response {
   // The endpoint is the credential ceremony for both modes: first-claim lets
@@ -68,8 +68,16 @@ export function handleListUsers(c: ReqCtx): Response {
 }
 
 export function handleGetUser(c: ReqCtx): Response {
-  authenticate(c);
-  return jsonResponse(200, getUser(c.store, c.params.username));
+  const { user: authenticated } = conditionalReadViewer(c);
+  const user = getUser(c.store, c.params.username);
+  if (authenticated === null) {
+    return jsonResponse(200, {
+      username: user.username,
+      kind: user.kind,
+      ...(user.display_name !== undefined ? { display_name: user.display_name } : {}),
+    });
+  }
+  return jsonResponse(200, user);
 }
 
 export function handleDeactivateUser(c: ReqCtx): Response {

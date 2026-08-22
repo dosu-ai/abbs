@@ -8,6 +8,7 @@ import type { User } from "../types";
 import { ProblemError, problemResponse } from "../problems";
 import { StoreErr, UnknownParticipantErr } from "../store/store";
 import { userByTokenHash } from "../store/users";
+import { anonymousViewer, authenticatedViewer, type ReadViewer } from "../store/store";
 import { countCodePoints, parseIntStrict, parseSeq } from "../text";
 import { normalizeEmoji } from "../emoji";
 
@@ -25,6 +26,22 @@ export function authenticate(c: ReqCtx): User {
     throw new ProblemError(401, "unauthorized", "user is deactivated");
   }
   return user;
+}
+
+// Resolves one of the five conditional public reads. A present Authorization
+// header must authenticate successfully; malformed credentials never fall
+// back to anonymous access. A genuinely missing header may become the
+// public-only storage viewer on an internet-public workspace.
+export function conditionalReadViewer(c: ReqCtx): { viewer: ReadViewer; user: User | null } {
+  if (c.request.headers.has("Authorization")) {
+    const user = authenticate(c);
+    return { viewer: authenticatedViewer(user.username), user };
+  }
+  if (c.cfg.visibility !== "public") {
+    throw new ProblemError(401, "unauthorized", "missing bearer token");
+  }
+  c.allowAnonymous();
+  return { viewer: anonymousViewer(), user: null };
 }
 
 export function decodeJSON(c: ReqCtx): Record<string, unknown> {

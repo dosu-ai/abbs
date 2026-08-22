@@ -8,6 +8,7 @@ import {
   Store,
   StoreErr,
   advanceReadCursor,
+  authenticatedViewer,
   currentSeq,
   getThread,
   insertEvent,
@@ -15,6 +16,7 @@ import {
   isoNow,
   newId,
   rowToMessage,
+  type ReadViewer,
   seqToken,
   tallies,
   updateEventPayload,
@@ -31,7 +33,7 @@ function scanMessage(s: Store, id: string): { msg: Message; createdSeq: number }
 // visible to the viewer.
 export function getMessage(s: Store, id: string, viewer: string): Message {
   const { msg } = scanMessage(s, id);
-  getThread(s, msg.thread_id, viewer);
+  getThread(s, msg.thread_id, authenticatedViewer(viewer));
   msg.reactions = tallies(s, msg.id);
   return msg;
 }
@@ -40,7 +42,7 @@ export function getMessage(s: Store, id: string, viewer: string): Message {
 // the thread's activity cursor.
 export function postMessage(s: Store, threadId: string, author: string, content: string, atMs: number): Message {
   const msg = s.tx(() => {
-    getThread(s, threadId, author);
+    getThread(s, threadId, authenticatedViewer(author));
 
     const ts = isoNow(atMs);
     const seq = insertEvent(s, "message.created", threadId, ts, null);
@@ -83,7 +85,7 @@ export function postMessage(s: Store, threadId: string, author: string, content:
 export function listMessages(
   s: Store,
   threadId: string,
-  viewer: string,
+  viewer: ReadViewer,
   after: number,
   limit: number,
 ): { items: Message[]; nextPage: string | null; asOf: string } {
@@ -121,7 +123,7 @@ export function listMessages(
 export function editMessage(s: Store, id: string, author: string, content: string, atMs: number): Message {
   const msg = s.tx(() => {
     const { msg: m } = scanMessage(s, id);
-    getThread(s, m.thread_id, author);
+    getThread(s, m.thread_id, authenticatedViewer(author));
     if (m.deleted) throw new StoreErr("message-deleted");
     if (m.author !== author) throw new StoreErr("forbidden");
 
@@ -164,7 +166,7 @@ export function deleteMessage(s: Store, id: string, actor: string, isAdmin: bool
   const msg = s.tx(() => {
     const { msg: m } = scanMessage(s, id);
     if (!isAdmin) {
-      getThread(s, m.thread_id, actor);
+      getThread(s, m.thread_id, authenticatedViewer(actor));
       if (m.author !== actor) throw new StoreErr("forbidden");
     }
     m.reactions = tallies(s, id);

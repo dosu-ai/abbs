@@ -8,7 +8,8 @@
 import { DurableObject } from "cloudflare:workers";
 import type { ReqCtx, ServerCfg, TestHooks, Waiter } from "./context";
 import type { Env, Limits, ServerInfo } from "./types";
-import { AUTH_API_KEY, AUTH_FIRST_CLAIM, defaultLimits } from "./types";
+import { defaultLimits } from "./types";
+import { parseWorkspaceConfig } from "./config";
 import { ProblemError, problemResponse } from "./problems";
 import { bearerToken, mintToken, sha256Hex } from "./auth";
 import { RateLimiter } from "./ratelimit";
@@ -90,6 +91,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   readonly testHooks: TestHooks = {};
   private router = new Router();
   private limiter = new RateLimiter(60, 1); // burst 60, 1 token/s — the Go defaults
+  private anonymousLimiter = new RateLimiter(60, 1);
   private cfg: ServerCfg;
   private limits: Limits;
   private info: ServerInfo;
@@ -104,23 +106,18 @@ export class WorkspaceDO extends DurableObject<Env> {
     super(ctx, env);
     this.store = new Store(ctx.storage, () => this.notifyEventTransports());
 
-    // Only the exact mode strings are accepted; anything else fails init
-    // rather than silently falling back to first-claim — a typo'd production
-    // AUTH_MODE must not enable unauthenticated identity claiming (parity
-    // with the Go entrypoint, which rejects unsupported modes).
-    const rawMode = env.AUTH_MODE ?? "";
-    if (rawMode !== "" && rawMode !== AUTH_API_KEY && rawMode !== AUTH_FIRST_CLAIM) {
-      throw new Error(`unsupported AUTH_MODE "${rawMode}" (want "${AUTH_FIRST_CLAIM}" or "${AUTH_API_KEY}")`);
-    }
-    const authMode = rawMode === AUTH_API_KEY ? AUTH_API_KEY : AUTH_FIRST_CLAIM;
-    this.cfg = { authMode, loopGuard: DEFAULT_LOOP_GUARD };
+    const workspace = parseWorkspaceConfig(env);
+    const authMode = workspace.authMode;
+    this.cfg = { authMode, visibility: workspace.visibility, loopGuard: DEFAULT_LOOP_GUARD };
     this.limits = defaultLimits();
-    const description = env.WORKSPACE_DESCRIPTION ?? "";
     this.info = {
       api_version: "v1",
       workspace: {
-        name: env.WORKSPACE_NAME || "abbs",
-        ...(description !== "" ? { description } : {}),
+        name: workspace.name,
+        ...(workspace.description !== undefined ? { description: workspace.description } : {}),
+        visibility: workspace.visibility,
+        ...(workspace.canonicalUrl !== undefined ? { canonical_url: workspace.canonicalUrl } : {}),
+        directory_listing: workspace.directoryListing,
       },
       auth_modes: [authMode],
       capabilities: ["websocket"],
@@ -357,6 +354,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         limits: this.limits,
         info: this.info,
         waitForEvent: () => this.waitForEvent(),
+        allowAnonymous: () => this.allowAnonymous(request),
         hooks: this.testHooks,
       };
 
@@ -372,6 +370,17 @@ export class WorkspaceDO extends DurableObject<Env> {
     } catch (err) {
       if (err instanceof ProblemError) return err.response();
       return problemResponse(500, "internal", err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  private allowAnonymous(request: Request): void {
+    const observed = (request.headers.get("CF-Connecting-IP") ?? "").trim();
+    const key = observed === "" ? "anonymous:fallback" : observed;
+    const { ok, retryAfter } = this.anonymousLimiter.allow(key, Date.now());
+    if (!ok) {
+      throw new ProblemError(429, "rate-limited", "anonymous read rate limit", {
+        "Retry-After": String(retryAfter),
+      });
     }
   }
 }

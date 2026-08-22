@@ -29,7 +29,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(server.New(st, server.Config{WorkspaceName: "test"}))
+	ts := httptest.NewServer(server.MustNew(st, server.Config{WorkspaceName: "test"}))
 	t.Cleanup(func() { ts.Close(); st.Close() })
 
 	anon := &client.Client{BaseURL: ts.URL}

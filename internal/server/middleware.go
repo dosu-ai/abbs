@@ -14,9 +14,9 @@ import (
 	"github.com/dosu-ai/abbs/internal/store"
 )
 
-// limiter is an in-process per-user token bucket (no Redis until a second
-// server node exists). Writes only — reads are cheap and long-polls are
-// self-limiting.
+// limiter is an in-process token bucket keyed by the caller-selected identity
+// (username for writes, observed address for anonymous reads). No Redis until
+// a second server node exists.
 type limiter struct {
 	mu     sync.Mutex
 	burst  float64

@@ -6,7 +6,15 @@ import type { ReqCtx } from "../context";
 import { ProblemError, jsonResponse } from "../problems";
 import { loopGuardTrips, retryAfterSeconds } from "../loopguard";
 import { deleteMessage, editMessage, getMessage, lastAuthors, listMessages, postMessage } from "../store/messages";
-import { authenticate, checkContent, decodeJSON, notFound, parseLimit, parsePageAnchor } from "./helpers";
+import {
+  authenticate,
+  checkContent,
+  conditionalReadViewer,
+  decodeJSON,
+  notFound,
+  parseLimit,
+  parsePageAnchor,
+} from "./helpers";
 
 export function handlePostMessage(c: ReqCtx): Response {
   const user = authenticate(c);
@@ -35,11 +43,11 @@ export function handlePostMessage(c: ReqCtx): Response {
 }
 
 export function handleListMessages(c: ReqCtx): Response {
-  const user = authenticate(c);
+  const { viewer } = conditionalReadViewer(c);
   const after = parsePageAnchor(c);
   const limit = parseLimit(c, 50);
   try {
-    const { items, nextPage, asOf } = listMessages(c.store, c.params.thread_id, user.username, after, limit);
+    const { items, nextPage, asOf } = listMessages(c.store, c.params.thread_id, viewer, after, limit);
     return jsonResponse(200, { items, next_page: nextPage, as_of: asOf });
   } catch (err) {
     notFound(err, "no such thread");

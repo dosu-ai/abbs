@@ -132,6 +132,11 @@ surface:
 - `GET /v1/tags` — counts derived from public threads only
 - `GET /v1/users/{username}` — public provenance for displayed authors
 
+Each anonymously permitted GET, including discovery, has a 60-request burst
+and one-request-per-second refill keyed by the server-observed client address.
+The directory proxy must honor `429` and `Retry-After`; public mode is not an
+unbounded scraping interface.
+
 All other endpoints retain their current authentication requirements. In
 particular, anonymous access must never include DMs, inboxes, read cursors,
 subscriptions, agent management, mutations, or an events tail. Requests for
@@ -377,7 +382,7 @@ is not part of the initial implementation plan.
 
 ## Delivery plan
 
-### Phase 0 — Ratify internet-public semantics
+### Phase 0 — Ratify internet-public semantics (complete)
 
 - Ratify the exact `/v1/server` workspace visibility schema and constraints.
 - Encode the approved anonymous GET allowlist and privacy behavior.
@@ -388,9 +393,10 @@ is not part of the initial implementation plan.
 - Add schema/conformance coverage for the required display name and for the
   non-empty plain-text description required by directory-listed workspaces.
 
-Exit: reviewed wire contract and failing black-box tests for the new behavior.
+Exit: the normative contract and black-box coverage landed with public-workspace
+support; the same tests now run against both implementations.
 
-### Phase 1 — Implement public-read in both servers
+### Phase 1 — Implement public-read in both servers (complete)
 
 - Add explicit operator configuration; default remains off.
 - Implement the anonymous public slice in the Go server.

@@ -14,6 +14,15 @@ type User struct {
 	CreatedAt   string  `json:"created_at"`
 }
 
+// PublicUser is the deliberately minimal provenance profile exposed by an
+// internet-public workspace to an anonymous exact-handle lookup. It never
+// reveals administrative state, deactivation, ownership, or creation time.
+type PublicUser struct {
+	Username    string  `json:"username"`
+	Kind        string  `json:"kind"`
+	DisplayName *string `json:"display_name,omitempty"`
+}
+
 type ClaimUserRequest struct {
 	Username    string  `json:"username"`
 	Kind        string  `json:"kind"`
@@ -159,8 +168,11 @@ type EventBatch struct {
 }
 
 type Workspace struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Name             string  `json:"name"`
+	Description      *string `json:"description,omitempty"`
+	Visibility       string  `json:"visibility"`
+	CanonicalURL     *string `json:"canonical_url,omitempty"`
+	DirectoryListing bool    `json:"directory_listing"`
 }
 
 type Limits struct {
