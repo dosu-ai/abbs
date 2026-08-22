@@ -11,7 +11,7 @@ Companion to [DESIGN.md](DESIGN.md) (what ABBS is) and [IMPLEMENTATION.md](IMPLE
 ## M0 — Scaffolding
 
 - `git init`; rename the directory `airc` → `abbs`.
-- Go module, repo layout: `/spec` (OpenAPI), `/cmd/abbs`, `/internal/`, `/conformance`, `/sdk` (empty until M8).
+- Go module, repo layout: `/spec` (OpenAPI), `/cmd/abbs`, `/internal/`, `/conformance`, `/sdk` (empty until M8, now deferred).
 - CI: lint + test + (from M1) spec validation. License, README stub pointing at the three docs.
 
 **Exit:** CI green on the wired-but-empty repo.
@@ -76,20 +76,18 @@ Re-sequenced after M5: the old "shared server" milestone bundled the cheap dogfo
 
 **Exit:** MCP reads serve from cache; deleting any cache file at any time rebuilds cleanly; two-workspace demo (local + the M6 shared server) works end to end. (Done: `internal/cache` is the cursor-replay loop into per-workspace SQLite — snapshot-then-tail bootstrap anchored at the first thread page's `as_of`, full-state upserts guarded by seq so overlap replay is idempotent, per-user reaction rows seeded from the reactions endpoint; evolution-rule tests assert unknown event types/fields neither crash the loop nor stall the cursor; `internal/workspace` loads TOML profiles (token/token_file/token_env, `read_only`), cache files keyed by workspace + credential hash; `abbs mcp` is multi-homed with a `workspace` parameter on every tool, `list_workspaces`, merged inbox, cached `list_threads`/`read_thread` with HTTP fallback for not-yet-tailed threads, and write refusal on `read_only` workspaces; the single-workspace ABBS_URL/ABBS_TOKEN mode still works without a config file. The two-workspace demo ran against two live servers; pointing profile two at the M6 shared instance is the ops step outside the repo.)
 
-## M8 — Client SDKs
+## M12 — WebSocket transport
 
-- TS + Python client SDKs generated from the spec; exercised against a live server in CI. (A codegen smoke job in CI can land any time earlier — it's a cheap alarm for spec constructs the generators choke on.)
-- Scope decision recorded: the read cache (M7) is a feature of the Go client/MCP adapter; the generated SDKs are thin HTTP clients in v1.
+(Numbered past M11 because M8/M9 kept their numbers when deferred; it sits here in the mainline sequence.)
 
-**Exit:** TS and Python SDKs are published/installable and pass their live-server CI job.
+Optional transport per DESIGN.md: the WS stream is a long-poll that doesn't hang up — same events, same cursors, same filters, long-polling stays mandatory.
 
-## M9 — Postgres + sequence-gap test
+- Spec first: `capabilities` field on `GET /v1/server`, plus a WS annex — OpenAPI 3.1 can't express the upgrade/frame protocol, so a short prose annex (or AsyncAPI fragment) referenced from the normative spec defines connect-with-cursor, frame format (`{seq, type, ...payload}`), and reconnect semantics.
+- Server: a thin loop over the same event query the long-poll uses — wake on broadcast, read past the cursor, write frames.
+- Client: the cache loop prefers WS when advertised and falls back to polling transparently; batch + cursor still commit in one transaction.
+- Conformance: WS and poll tails from the same cursor observe identical event sequences, including across a forced disconnect/reconnect; skipped against servers not advertising the capability.
 
-- Carve the storage interface first (the server currently depends on the concrete SQLite `*store.Store`), then the Postgres implementation: **serialized appends via `pg_advisory_xact_lock`**, `LISTEN/NOTIFY` wakeups.
-- A dedicated **sequence-gap test**: concurrent writers + a tailing reader under load, asserting no event is ever skipped. This is the top correctness risk; it gets its own CI job.
-- Gate: lands before any deployment with real concurrent write load.
-
-**Exit:** the identical conformance suite passes both storage configurations (SQLite and Postgres) in CI.
+**Exit:** conformance equivalence tests pass; the MCP adapter dogfoods over WS against the shared server with polling fallback verified.
 
 ## M10 — OIDC mode
 
@@ -102,6 +100,28 @@ Re-sequenced after M5: the old "shared server" milestone bundled the cheap dogfo
 - Release pipeline (goreleaser); versioning policy written down.
 
 **Exit:** `v1.0` tag; a third party can implement the protocol from `/spec` + `/conformance` alone, never reading our server code.
+
+## Deferred milestones
+
+Pulled out of the mainline sequence (numbers kept so earlier cross-references stay valid); neither blocks v1.0. Both are pull-based — reopened when demand appears, not on a date.
+
+### M8 — Client SDKs (deferred)
+
+Deferred: the Go client + MCP adapter is the only consumer with real demand today, and generated SDKs are purely additive later (the spec is the artifact; nothing on the wire depends on them). Reopen when a non-Go, non-MCP consumer actually shows up.
+
+- TS + Python client SDKs generated from the spec; exercised against a live server in CI. (A codegen smoke job in CI can land any time earlier — it's a cheap alarm for spec constructs the generators choke on.)
+- Scope decision recorded: the read cache (M7) is a feature of the Go client/MCP adapter; the generated SDKs are thin HTTP clients in v1.
+
+**Exit:** TS and Python SDKs are published/installable and pass their live-server CI job.
+
+### M9 — Postgres + sequence-gap test (deferred)
+
+Deferred: single-node SQLite (+ Litestream) is carrying the dogfood load fine, and the wire spec is storage-agnostic — even the escape hatch (committed-watermark reads) changes nothing on the wire. The gate stands regardless of numbering: **lands before any deployment with real concurrent write load.**
+
+- Carve the storage interface first (the server currently depends on the concrete SQLite `*store.Store`), then the Postgres implementation: **serialized appends via `pg_advisory_xact_lock`**, `LISTEN/NOTIFY` wakeups.
+- A dedicated **sequence-gap test**: concurrent writers + a tailing reader under load, asserting no event is ever skipped. This is the top correctness risk; it gets its own CI job.
+
+**Exit:** the identical conformance suite passes both storage configurations (SQLite and Postgres) in CI.
 
 ## Out of plan (per DESIGN.md)
 
