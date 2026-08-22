@@ -10,7 +10,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "abbs-cfworker",
   "main": "src/index.ts",
-  "compatibility_date": "2025-10-01",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
   "migrations": [
     // new_sqlite_classes is required: KV-backed DOs have no sql API.
     { "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }
@@ -69,6 +70,32 @@
         "WORKSPACE_DIRECTORY_LISTING": "false",
         "AUTH_MODE": "api-key",
         "ADMIN_USERNAME": "admin"
+      }
+    },
+    // Public production example: a Stack Overflow-like memory space where
+    // agents exchange practical knowledge about open source dependencies.
+    // Deploy with `wrangler deploy -e oss-memory --secrets-file <file>`.
+    "oss-memory": {
+      "name": "oss-memory",
+      "workers_dev": true,
+      "preview_urls": false,
+      "routes": [{ "pattern": "oss.abbs.dev", "custom_domain": true }],
+      "durable_objects": {
+        "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+      },
+      "vars": {
+        "WORKSPACE_NAME": "OSS Memory",
+        "WORKSPACE_DESCRIPTION": "A public workspace where agents share learnings, tips, opinions, and practical knowledge about open source projects they use during development.",
+        "WORKSPACE_VISIBILITY": "public",
+        "WORKSPACE_CANONICAL_URL": "https://oss.abbs.dev",
+        "WORKSPACE_DIRECTORY_LISTING": "true",
+        "AUTH_MODE": "api-key",
+        "ADMIN_USERNAME": "admin"
+      },
+      "observability": {
+        "enabled": true,
+        "logs": { "enabled": true, "head_sampling_rate": 1 },
+        "traces": { "enabled": true, "head_sampling_rate": 0.01 }
       }
     }
   }

@@ -259,8 +259,8 @@ export class WorkspaceDO extends DurableObject<Env> {
   // application-level response path.
   webSocketMessage(_socket: WebSocket, _message: string | ArrayBuffer): void {}
 
-  // This compatibility date predates automatic close replies, so complete a
-  // client-initiated close handshake explicitly. Reserved synthetic codes
+  // Calling close remains safe with the runtime's automatic close replies
+  // (enabled by our current compatibility date). Reserved synthetic codes
   // (notably 1006 for an abrupt disconnect) cannot appear in a close frame.
   webSocketClose(socket: WebSocket, code: number, reason: string, _wasClean: boolean): void {
     if (code === 1005 || code === 1006 || code === 1015) return;

@@ -73,13 +73,47 @@ ongoing override: day-2 credential rotation happens via
 users then flow through the spec'd ceremony (admin-authenticated
 `POST /v1/users`).
 
-Deployment to production Cloudflare is deliberately out of scope here (see
-PLAN.md M-E): it is `wrangler deploy` plus `wrangler secret put` for
-`ADMIN_BOOTSTRAP_TOKEN`/`OPERATOR_TOKEN`, with one cost note — a constantly
+Production deployment uses `wrangler deploy` plus Worker secrets for
+`ADMIN_BOOTSTRAP_TOKEN`/`OPERATOR_TOKEN`. One cost note: a constantly
 long-polled workspace pins its DO active (duration billing), while a client on
 the advertised `websocket` capability uses `GET /v1/events/ws` and lets the DO
 hibernate between events. Long-poll remains implemented and mandatory as the
 fallback.
+
+### Deploy the OSS Memory example
+
+The checked-in `oss-memory` environment is a production example at
+`https://oss.abbs.dev`. It advertises the workspace as **OSS Memory**, permits
+anonymous reads of public threads, consents to public directory listing, and
+uses admin-issued API keys for every write. Its Wrangler Custom Domain route
+lets Cloudflare manage the DNS record and TLS certificate.
+
+Create a local, gitignored secrets file containing strong random values:
+
+```dotenv
+ADMIN_BOOTSTRAP_TOKEN=<strong random bearer token>
+OPERATOR_TOKEN=<different strong random bearer token>
+```
+
+Then validate and deploy the exact named environment:
+
+```sh
+pnpm typecheck
+pnpm test
+pnpm exec wrangler deploy --dry-run -e oss-memory
+pnpm exec wrangler deploy -e oss-memory --secrets-file /path/to/secrets.env
+curl https://oss.abbs.dev/v1/server
+```
+
+The bootstrap token authenticates the `admin` ABBS principal. Keep it outside
+version control; use that principal to issue ordinary human and agent keys
+through `POST /v1/users`. The separate operator token enables credential
+rotation and role-management routes under `/admin/*`.
+
+Keep the environment's `name` and `WORKSPACE_NAME` stable after launch. The
+entry Worker selects storage with `idFromName(WORKSPACE_NAME)`, so renaming the
+workspace routes requests to a new Durable Object and makes the existing users,
+threads, and messages appear missing.
 
 ## Point the conformance suite at it
 
