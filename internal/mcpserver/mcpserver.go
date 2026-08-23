@@ -178,10 +178,11 @@ func New(wss []*Workspace) *mcp.Server {
 	return s
 }
 
-// resolve maps the workspace tool parameter to an available connection. With
-// several configured workspaces, an empty name is allowed only when exactly
-// one is currently available. "Posted to the wrong community" remains a type
-// error whenever there is a live choice to make.
+// resolve maps the workspace tool parameter to an available connection. An
+// empty name is allowed only when exactly one workspace is configured.
+// Availability must never narrow an ambiguous write target: a temporarily
+// unavailable company workspace cannot make an OSS workspace the implicit
+// destination.
 func (a *adapter) resolve(name string) (*Workspace, error) {
 	if name != "" {
 		w, ok := a.workspaces[name]
@@ -194,21 +195,15 @@ func (a *adapter) resolve(name string) (*Workspace, error) {
 		return w, nil
 	}
 
-	var available []*Workspace
-	var unavailable []string
-	for _, configuredName := range a.names {
-		w := a.workspaces[configuredName]
-		if err := w.unavailableError(); err != nil {
-			unavailable = append(unavailable, err.Error())
-			continue
-		}
-		available = append(available, w)
-	}
-	switch len(available) {
+	switch len(a.names) {
 	case 1:
-		return available[0], nil
+		w := a.workspaces[a.names[0]]
+		if err := w.unavailableError(); err != nil {
+			return nil, err
+		}
+		return w, nil
 	case 0:
-		return nil, fmt.Errorf("no workspaces are available: %s", strings.Join(unavailable, "; "))
+		return nil, errors.New("no workspaces are configured")
 	default:
 		return nil, fmt.Errorf("several workspaces are configured — pass workspace: one of %s", strings.Join(a.names, ", "))
 	}
@@ -484,11 +479,15 @@ func (a *adapter) markRead(ctx context.Context, req *mcp.CallToolRequest, in mar
 
 type workspaceLogger func(name, format string, args ...any)
 
+const defaultWorkspaceConnectTimeout = 8 * time.Second
+
 type workspaceRuntime struct {
 	w       *Workspace
 	profile workspace.Profile
 	noCache bool
 	logf    workspaceLogger
+
+	connectTimeout time.Duration
 
 	cachePath func(name, url, token string) (string, error)
 	openCache func(path string) (*cache.Cache, error)
@@ -500,19 +499,30 @@ func (r *workspaceRuntime) log(format string, args ...any) {
 	}
 }
 
-// connect performs one attempt to make a configured workspace usable. Cache
-// setup is deliberately optional: discovery establishes availability, while a
-// cache path/open failure leaves reads on the HTTP path.
+// connect performs one bounded attempt to make a configured workspace usable.
+// Discovery is anonymous, so availability is established only after an
+// authenticated inbox probe. Cache setup is deliberately optional: a cache
+// path/open failure leaves reads on the HTTP path.
 func (r *workspaceRuntime) connect(ctx context.Context) error {
+	timeout := r.connectTimeout
+	if timeout <= 0 {
+		timeout = defaultWorkspaceConnectTimeout
+	}
+	connectCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	token, err := r.profile.ResolveToken()
 	if err != nil {
 		return fmt.Errorf("resolve credential: %w", err)
 	}
 	baseURL := strings.TrimRight(r.profile.URL, "/")
 	c := &client.Client{BaseURL: baseURL, Token: token}
-	info, err := c.ServerInfo(ctx)
+	info, err := c.ServerInfo(connectCtx)
 	if err != nil {
 		return fmt.Errorf("cannot reach server at %s: %w", r.profile.URL, err)
+	}
+	if _, err := c.Inbox(connectCtx, "", 1); err != nil {
+		return fmt.Errorf("cannot authenticate to server at %s: %w", r.profile.URL, err)
 	}
 
 	var ca *cache.Cache
@@ -581,29 +591,48 @@ func (r *workspaceRuntime) retry(ctx context.Context, previous error) {
 }
 
 // initializeWorkspaces registers every configured profile, retaining failed
-// ones in the returned slice. It returns an error only when there is no usable
-// workspace, preserving single-workspace fail-fast while allowing a healthy
-// workspace to carry its unavailable peers.
+// ones in the returned slice. Initial attempts run concurrently so a server
+// that consumes its connection deadline cannot delay healthy peers. It returns
+// an error only when there is no usable workspace, preserving single-workspace
+// fail-fast while allowing a healthy workspace to carry its unavailable peers.
 func initializeWorkspaces(ctx context.Context, profiles map[string]workspace.Profile, names []string, noCache bool, logf workspaceLogger) ([]*Workspace, error) {
-	wss := make([]*Workspace, 0, len(names))
+	type connectResult struct {
+		index   int
+		runtime *workspaceRuntime
+		err     error
+	}
+
+	wss := make([]*Workspace, len(names))
+	results := make(chan connectResult, len(names))
+	for i, name := range names {
+		p := profiles[name]
+		w := &Workspace{Name: name, URL: strings.TrimRight(p.URL, "/"), ReadOnly: p.ReadOnly}
+		runtime := &workspaceRuntime{w: w, profile: p, noCache: noCache, logf: logf}
+		wss[i] = w
+		go func(index int, runtime *workspaceRuntime) {
+			results <- connectResult{index: index, runtime: runtime, err: runtime.connect(ctx)}
+		}(i, runtime)
+	}
+
+	initial := make([]connectResult, len(names))
+	for range names {
+		result := <-results
+		initial[result.index] = result
+	}
+
 	var failed []*workspaceRuntime
 	var initialErrors []error
 	var failures []string
 	available := 0
-
-	for _, name := range names {
-		p := profiles[name]
-		w := &Workspace{Name: name, URL: strings.TrimRight(p.URL, "/"), ReadOnly: p.ReadOnly}
-		runtime := &workspaceRuntime{w: w, profile: p, noCache: noCache, logf: logf}
-		if err := runtime.connect(ctx); err != nil {
-			w.setUnavailable(err)
-			failed = append(failed, runtime)
-			initialErrors = append(initialErrors, err)
-			failures = append(failures, fmt.Sprintf("%s: %v", name, err))
+	for _, result := range initial {
+		if result.err != nil {
+			result.runtime.w.setUnavailable(result.err)
+			failed = append(failed, result.runtime)
+			initialErrors = append(initialErrors, result.err)
+			failures = append(failures, fmt.Sprintf("%s: %v", result.runtime.w.Name, result.err))
 		} else {
 			available++
 		}
-		wss = append(wss, w)
 	}
 
 	if available == 0 {

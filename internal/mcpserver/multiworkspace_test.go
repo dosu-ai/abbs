@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -174,7 +175,7 @@ func TestMultiWorkspace(t *testing.T) {
 	}
 }
 
-func TestUnavailableWorkspaceRemainsVisibleAndSoleAvailableDefaults(t *testing.T) {
+func TestUnavailableWorkspaceRemainsVisibleAndDoesNotBecomeUnambiguous(t *testing.T) {
 	healthy := &Workspace{Name: "healthy", Label: "Healthy", URL: "http://healthy", Client: &client.Client{BaseURL: "http://healthy"}}
 	bad := &Workspace{Name: "bad", URL: "http://bad"}
 	bad.setUnavailable(errors.New("connection refused"))
@@ -183,12 +184,15 @@ func TestUnavailableWorkspaceRemainsVisibleAndSoleAvailableDefaults(t *testing.T
 		names:      []string{"bad", "healthy"},
 	}
 
-	got, err := a.resolve("")
-	if err != nil || got != healthy {
-		t.Fatalf("resolve sole available workspace = %v, %v", got, err)
+	if got, err := a.resolve(""); err == nil || got != nil || !strings.Contains(err.Error(), "several workspaces") {
+		t.Fatalf("resolve omitted workspace = %v, %v", got, err)
 	}
 	if _, err := a.resolve("bad"); err == nil || !strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "unknown workspace") {
 		t.Fatalf("resolve unavailable workspace error = %v", err)
+	}
+	single := &adapter{workspaces: map[string]*Workspace{"bad": bad}, names: []string{"bad"}}
+	if got, err := single.resolve(""); err == nil || got != nil || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("resolve sole configured unavailable workspace = %v, %v", got, err)
 	}
 
 	_, out, err := a.listWorkspaces(context.Background(), nil, struct{}{})
@@ -378,7 +382,7 @@ func TestUnavailableWorkspaceRecoversWithoutRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &adapter{workspaces: map[string]*Workspace{"flaky": wss[0], "healthy": wss[1]}, names: []string{"flaky", "healthy"}}
-	if got, err := a.resolve(""); err != nil || got.Name != "healthy" {
+	if got, err := a.resolve(""); err == nil || got != nil || !strings.Contains(err.Error(), "several workspaces") {
 		t.Fatalf("resolve while flaky is down = %v, %v", got, err)
 	}
 	if _, err := a.resolve("flaky"); err == nil || !strings.Contains(err.Error(), "HTTP 503") {
@@ -398,6 +402,123 @@ func TestUnavailableWorkspaceRecoversWithoutRestart(t *testing.T) {
 	}
 	if _, err := a.resolve(""); err == nil || !strings.Contains(err.Error(), "several workspaces") {
 		t.Fatalf("empty workspace with both recovered = %v", err)
+	}
+}
+
+func TestInvalidCredentialStaysUnavailableAndTokenFileCorrectionRecovers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st, err := store.Open(filepath.Join(t.TempDir(), "abbs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(server.MustNew(st, server.Config{WorkspaceName: "authenticated"}))
+	t.Cleanup(func() { ts.Close(); st.Close() })
+	claim, err := (&client.Client{BaseURL: ts.URL}).ClaimUser(ctx, api.ClaimUserRequest{Username: "me", Kind: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("invalid-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	profiles := map[string]workspace.Profile{
+		"invalid": {URL: ts.URL, TokenFile: tokenFile},
+		"healthy": {URL: ts.URL, Token: claim.Token},
+	}
+	wss, err := initializeWorkspaces(ctx, profiles, []string{"invalid", "healthy"}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wss[0].unavailableError(); err == nil || !strings.Contains(err.Error(), "cannot authenticate") || !strings.Contains(err.Error(), "unknown token") {
+		t.Fatalf("invalid credential availability = %v", err)
+	}
+	wss[0].mu.RLock()
+	invalidClient, invalidLabel := wss[0].Client, wss[0].Label
+	wss[0].mu.RUnlock()
+	if invalidClient != nil || invalidLabel != "" {
+		t.Fatalf("invalid credential published workspace: client=%v label=%q", invalidClient, invalidLabel)
+	}
+
+	if err := os.WriteFile(tokenFile, []byte(claim.Token+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for wss[0].unavailableError() != nil && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := wss[0].unavailableError(); err != nil {
+		t.Fatalf("workspace did not recover after token-file correction: %v", err)
+	}
+	if _, err := wss[0].clientForRequest(); err != nil || wss[0].info().Label != "authenticated" {
+		t.Fatalf("corrected credential was not published: info=%+v err=%v", wss[0].info(), err)
+	}
+}
+
+func TestConnectAttemptHasOverallDeadline(t *testing.T) {
+	requestStarted := make(chan struct{})
+	var once sync.Once
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(requestStarted) })
+		<-r.Context().Done()
+	}))
+	t.Cleanup(ts.Close)
+
+	runtime := &workspaceRuntime{
+		w:              &Workspace{Name: "hanging", URL: ts.URL},
+		profile:        workspace.Profile{URL: ts.URL, Token: "token"},
+		noCache:        true,
+		connectTimeout: 250 * time.Millisecond,
+	}
+	started := time.Now()
+	err := runtime.connect(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("bounded connect error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("bounded connect took %s", elapsed)
+	}
+	select {
+	case <-requestStarted:
+	default:
+		t.Fatal("hanging discovery request never started")
+	}
+}
+
+func TestInitializeWorkspacesConnectsProfilesConcurrently(t *testing.T) {
+	hanging := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(hanging.Close)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "healthy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthy := httptest.NewServer(server.MustNew(st, server.Config{WorkspaceName: "healthy"}))
+	t.Cleanup(func() { healthy.Close(); st.Close() })
+	claim, err := (&client.Client{BaseURL: healthy.URL}).ClaimUser(context.Background(), api.ClaimUserRequest{Username: "me", Kind: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	profiles := map[string]workspace.Profile{
+		"hanging": {URL: hanging.URL, Token: "token"},
+		"healthy": {URL: healthy.URL, Token: claim.Token},
+	}
+	started := time.Now()
+	wss, err := initializeWorkspaces(ctx, profiles, []string{"hanging", "healthy"}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("concurrent initialization took %s", elapsed)
+	}
+	if len(wss) != 2 || wss[0].unavailableError() == nil || wss[1].unavailableError() != nil || wss[1].Client == nil {
+		t.Fatalf("initialized workspaces = %+v", wss)
 	}
 }
 
