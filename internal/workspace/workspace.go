@@ -84,6 +84,11 @@ func upsert(path, name string, p Profile, rename func(string, string) error) err
 	if p.URL == "" {
 		return fmt.Errorf("workspace %q: url is required", name)
 	}
+	unlock, err := lockConfig(path)
+	if err != nil {
+		return fmt.Errorf("lock workspace config %s: %w", path, err)
+	}
+	defer unlock()
 
 	original, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -164,7 +169,6 @@ func profileBlock(name string, p Profile) []byte {
 }
 
 func replaceBlock(original []byte, name string, block []byte) []byte {
-	header := "[workspaces." + name + "]"
 	start, end := -1, -1
 	for offset := 0; offset < len(original); {
 		next := bytes.IndexByte(original[offset:], '\n')
@@ -172,13 +176,11 @@ func replaceBlock(original []byte, name string, block []byte) []byte {
 		if next >= 0 {
 			lineEnd = offset + next + 1
 		}
-		line := strings.TrimSpace(string(original[offset:lineEnd]))
-		if comment := strings.IndexByte(line, '#'); comment >= 0 {
-			line = strings.TrimSpace(line[:comment])
-		}
-		if start < 0 && line == header {
+		key, tableType, isTable := parseTableHeader(original[offset:lineEnd])
+		isTarget := isTable && tableType == "Hash" && len(key) == 2 && key[0] == "workspaces" && key[1] == name
+		if start < 0 && isTarget {
 			start = offset
-		} else if start >= 0 && strings.HasPrefix(line, "[") {
+		} else if start >= 0 && isTable {
 			end = offset
 			break
 		}
@@ -203,6 +205,29 @@ func replaceBlock(original []byte, name string, block []byte) []byte {
 		out = append(out, '\n')
 	}
 	return append(out, block...)
+}
+
+// parseTableHeader lets the TOML parser decide whether a line is a table
+// header and returns its semantic key. In particular, workspaces.board and
+// workspaces."board" are the same TOML key even though their bytes differ.
+func parseTableHeader(line []byte) (toml.Key, string, bool) {
+	if !strings.HasPrefix(strings.TrimSpace(string(line)), "[") {
+		return nil, "", false
+	}
+	var parsed map[string]any
+	metadata, err := toml.Decode(string(line), &parsed)
+	if err != nil {
+		return nil, "", false
+	}
+	keys := metadata.Keys()
+	if len(keys) != 1 {
+		return nil, "", false
+	}
+	tableType := metadata.Type(keys[0]...)
+	if tableType != "Hash" && tableType != "ArrayHash" {
+		return nil, "", false
+	}
+	return keys[0], tableType, true
 }
 
 // Load parses the profiles file. Names are returned sorted for stable

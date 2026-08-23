@@ -2,9 +2,11 @@ package workspace
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -49,6 +51,65 @@ func TestUpsertPreservesOtherEntriesByteForByte(t *testing.T) {
 		t.Fatalf("target block was not replaced:\n%s", got)
 	}
 	assertPerm(t, path, 0o600)
+}
+
+func TestUpsertReplacesEquivalentQuotedTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspaces.toml")
+	original := []byte("# leading comment\n[workspaces.\"board\"] # quoted key\nurl = \"https://old.example\"\ntoken = \"old\"\n\n[workspaces.other]\nurl = \"https://other.example\"\ntoken = \"other\"\n")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := Profile{URL: "https://new.example", TokenFile: "/new.token", ReadOnly: true}
+	if err := Upsert(path, "board", want); err != nil {
+		t.Fatal(err)
+	}
+	profiles, names, err := Load(path)
+	if err != nil {
+		t.Fatalf("updated quoted table no longer loads: %v", err)
+	}
+	if len(names) != 2 || profiles["board"] != want || profiles["other"].URL != "https://other.example" {
+		t.Fatalf("profiles = %#v, names = %v", profiles, names)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "https://old.example") {
+		t.Fatalf("quoted target table was not replaced:\n%s", got)
+	}
+}
+
+func TestConcurrentUpsertsPreserveEveryProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspaces.toml")
+	const count = 32
+	start := make(chan struct{})
+	errs := make(chan error, count)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			name := fmt.Sprintf("board-%02d", i)
+			errs <- Upsert(path, name, Profile{URL: "https://" + name + ".example", TokenEnv: "TOKEN"})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	profiles, names, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != count || len(names) != count {
+		t.Fatalf("concurrent upserts retained %d profiles, want %d", len(profiles), count)
+	}
 }
 
 func TestUpsertAppendsWithoutChangingExistingBytes(t *testing.T) {

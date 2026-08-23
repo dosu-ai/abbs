@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -102,6 +103,90 @@ func TestConnectFreshJSONAndIdempotent(t *testing.T) {
 	tokenAfter, _ := os.ReadFile(p.TokenFile)
 	if !bytes.Equal(configBefore, configAfter) || !bytes.Equal(tokenBefore, tokenAfter) {
 		t.Fatal("idempotent reconnect changed config or token")
+	}
+}
+
+func TestConnectReconnectPersistsReadOnlyPosture(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ABBS_CONFIG", "")
+	board := newConnectBoard(t, "Board")
+	configPath := filepath.Join(home, ".config", "abbs", "workspaces.toml")
+
+	var stdout, stderr bytes.Buffer
+	if code := runConnect([]string{board.server.URL, "-username", "alice", "-json"}, &stdout, &stderr); code != connectOK {
+		t.Fatalf("first connect exit = %d, stderr = %s", code, stderr.String())
+	}
+	profiles, _, err := workspace.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profiles["board"].ReadOnly {
+		t.Fatal("fresh profile unexpectedly read-only")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runConnect([]string{board.server.URL, "-username", "alice", "-read-only", "-json"}, &stdout, &stderr); code != connectOK {
+		t.Fatalf("reconnect exit = %d, stderr = %s", code, stderr.String())
+	}
+	var result connectResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("reconnect JSON output = %q: %v", stdout.String(), err)
+	}
+	if !result.AlreadyConnected || result.Username != "alice" {
+		t.Fatalf("reconnect result = %#v", result)
+	}
+	profiles, _, err = workspace.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !profiles["board"].ReadOnly {
+		t.Fatal("reconnect did not persist read-only posture")
+	}
+
+	// Omitting -read-only on a later reconnect must not silently weaken the
+	// profile; the flag is an opt-in hardening operation, not a toggle.
+	stdout.Reset()
+	stderr.Reset()
+	if code := runConnect([]string{board.server.URL, "-username", "alice", "-json"}, &stdout, &stderr); code != connectOK {
+		t.Fatalf("third connect exit = %d, stderr = %s", code, stderr.String())
+	}
+	profiles, _, err = workspace.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !profiles["board"].ReadOnly {
+		t.Fatal("reconnect without -read-only weakened the posture")
+	}
+}
+
+func TestConnectLegacyProfileDoesNotGuessTokenIdentity(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ABBS_CONFIG", "")
+	board := newConnectBoard(t, "Board")
+	claimed, err := (&client.Client{BaseURL: board.server.URL}).ClaimUser(context.Background(), api.ClaimUserRequest{Username: "alice", Kind: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "profiles.toml")
+	original := []byte(fmt.Sprintf("[workspaces.board]\nurl = %q\ntoken = %q\n", board.server.URL, claimed.Token))
+	if err := os.WriteFile(configPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runConnect([]string{board.server.URL, "-username", "bob", "-config", configPath, "-json"}, &stdout, &stderr)
+	if code != connectUsageError || stdout.Len() != 0 || !strings.Contains(stderr.String(), "has no username metadata") {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout.String(), stderr.String())
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatal("unverifiable legacy profile was modified")
 	}
 }
 

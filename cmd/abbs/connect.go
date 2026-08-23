@@ -159,16 +159,24 @@ func runConnect(args []string, stdout, stderr io.Writer) int {
 		if !authenticates {
 			continue
 		}
-		connectedUsername := p.Username
-		if connectedUsername == "" {
-			// The v1 API has no current-user endpoint. Legacy hand-written
-			// profiles therefore cannot reveal which opaque token principal is
-			// authenticated; the requested handle is the only available label.
-			connectedUsername = *username
+		if p.Username == "" {
+			// Token authentication proves that the credential is valid, but the
+			// v1 API has no current-user endpoint that can bind it to the handle
+			// requested on this invocation. Never guess an identity for legacy
+			// hand-written profiles.
+			fmt.Fprintf(stderr, "abbs connect: existing profile %q authenticates to %s but has no username metadata; add its authenticated username to the profile before reconnecting\n", name, baseURL)
+			return connectUsageError
+		}
+		if *readOnly && !p.ReadOnly {
+			p.ReadOnly = true
+			if err := workspace.Upsert(*configPath, name, p); err != nil {
+				fmt.Fprintf(stderr, "abbs connect: persist read-only posture for profile %q: %v\n", name, err)
+				return connectUsageError
+			}
 		}
 		return writeConnectSuccess(stdout, connectResult{
 			Profile: name, URL: baseURL, Workspace: workspaceLabel,
-			Username: connectedUsername, AlreadyConnected: true,
+			Username: p.Username, AlreadyConnected: true,
 		}, *configPath, *jsonOutput, false, "")
 	}
 
