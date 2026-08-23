@@ -95,6 +95,135 @@
       .catch(() => announce("COPY FAILED"));
   };
 
+  // -- action bar: copy an agent prompt (design 12b) --------------------------
+  // At rest the bar shows its labels. Activating one that carries a prompt
+  // puts it on the clipboard and swaps the label row for the prompt in
+  // place, confirming just below the bar. Every row comes from the server,
+  // so this only toggles visibility — and without the script each label
+  // stays an ordinary link. Labels with no prompt row ([A], the submission
+  // form) are left alone and simply navigate.
+
+  /** @type {HTMLElement | null} */
+  const ctaBar = document.querySelector("[data-cta-bar]");
+  /** @type {HTMLElement | null} */
+  const ctaRow = document.querySelector("[data-cta-row]");
+  /** @type {HTMLElement | null} */
+  const statusMark = document.querySelector("[data-cta-status-mark]");
+  /** @type {HTMLElement | null} */
+  const statusDetail = document.querySelector("[data-cta-status-detail]");
+
+  // How long the swapped row and its confirmation stay up. Long enough to
+  // read a URL, short enough that the bar is back to normal by the time
+  // anyone looks again.
+  const CTA_REVEAL_MS = 6000;
+  let ctaTimer = 0;
+
+  /** @type {HTMLElement | null} */
+  let ctaOrigin = null;
+
+  /**
+   * @param {"ok" | "warn"} kind
+   * @param {string} mark
+   * @param {string} detail
+   */
+  const setStatus = (kind, mark, detail) => {
+    if (ctaBar === null || statusMark === null || statusDetail === null) return;
+    statusMark.textContent = mark;
+    statusDetail.textContent = detail;
+    ctaBar.dataset.status = kind;
+  };
+
+  const clearStatus = () => {
+    if (ctaBar !== null) delete ctaBar.dataset.status;
+  };
+
+  /** @returns {HTMLElement[]} */
+  const ctaPrompts = () =>
+    /** @type {HTMLElement[]} */ (Array.from(document.querySelectorAll("[data-cta-prompt]")));
+
+  /** @returns {boolean} whether focus was inside the row being hidden */
+  const hidePrompts = () => {
+    const prompts = ctaPrompts();
+    const held = prompts.some((p) => p === document.activeElement);
+    prompts.forEach((p) => {
+      p.hidden = true;
+    });
+    return held;
+  };
+
+  const restCta = () => {
+    window.clearTimeout(ctaTimer);
+    const held = hidePrompts();
+    if (ctaRow !== null) ctaRow.hidden = false;
+    clearStatus();
+    // Hiding the focused paragraph would drop focus to the top of the
+    // document, so hand it back to the label that opened it — but only when
+    // focus was still in there, never stealing it back on the auto-revert.
+    if (held && ctaOrigin !== null) ctaOrigin.focus();
+    ctaOrigin = null;
+  };
+
+  // The prompt row belonging to a label, or null when that label is just a
+  // link. The id comes back out of the DOM, so match it against the dataset
+  // rather than splicing it into a selector string.
+  /** @param {HTMLElement} cta */
+  const promptFor = (cta) =>
+    ctaPrompts().find((p) => p.dataset.ctaPrompt === (cta.dataset.cta ?? "")) ?? null;
+
+  /** @param {HTMLElement} cta @returns {boolean} whether a prompt was revealed */
+  const reveal = (cta) => {
+    const prompt = promptFor(cta);
+    if (prompt === null || ctaRow === null) return false;
+
+    window.clearTimeout(ctaTimer);
+    // Pressing the other key mid-reveal swaps prompts rather than stacking
+    // a second one under the first.
+    hidePrompts();
+    ctaOrigin = cta;
+    ctaRow.hidden = true;
+    prompt.hidden = false;
+    // The activated label just left the document, so park focus on what
+    // replaced it rather than dropping the keyboard user back at the top.
+    prompt.focus();
+    ctaTimer = window.setTimeout(restCta, CTA_REVEAL_MS);
+
+    const text = prompt.dataset.prompt ?? "";
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setStatus("ok", "✓ PROMPT COPIED", "- PASTE IT INTO YOUR AGENT");
+        announce("PROMPT COPIED — PASTE IT INTO YOUR AGENT");
+      })
+      .catch(() => {
+        // The prompt is on screen either way, so the fallback is to select it.
+        setStatus("warn", "! COPY BLOCKED", "- SELECT THE PROMPT ABOVE");
+        announce(`COPY BLOCKED. THE PROMPT IS: ${text}`);
+      });
+    return true;
+  };
+
+  /** @param {string} id @returns {boolean} whether a prompt was revealed */
+  const revealById = (id) => {
+    /** @type {HTMLElement | null} */
+    const cta = document.querySelector(`[data-cta="${id}"]`);
+    return cta !== null && reveal(cta);
+  };
+
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    /** @type {HTMLElement | null} */
+    const cta = t.closest("[data-cta]");
+    if (cta === null) return;
+    // Leave modified and middle clicks to the browser: the label is a real
+    // link, and opening the brief in a new tab stays possible. A label with
+    // no prompt row is only ever a link, so it navigates as written.
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (promptFor(cta) === null) return;
+    e.preventDefault();
+    reveal(cta);
+  });
+
   // -- add-board form ---------------------------------------------------------
   // The form posts and redirects without JS; this only labels the wait,
   // since verification contacts the remote workspace and can take seconds.
@@ -140,7 +269,11 @@
     }
 
     const body = document.body.dataset;
-    switch (e.key) {
+    // Shift is not a modifier here, so a stray caps lock (or a hand still on
+    // shift after typing "?") should not silently swallow a shortcut. Only
+    // printable keys fold; named keys like Escape and ArrowDown pass through
+    // as-is, and punctuation such as "/" and "?" is unaffected by casing.
+    switch (e.key.length === 1 ? e.key.toLowerCase() : e.key) {
       case "j":
       case "ArrowDown":
         move(1);
@@ -164,9 +297,25 @@
         }
         break;
       case "Escape":
+        // A revealed prompt is the innermost thing Esc can dismiss; only
+        // once the bar is back at rest does Esc mean "leave this screen".
+        if (ctaOrigin !== null) {
+          restCta();
+          e.preventDefault();
+          break;
+        }
         go(body.parentUrl);
         break;
+      case "i":
+        if (revealById("install")) e.preventDefault();
+        break;
       case "n": {
+        // [N] is CREATE A BOARD wherever the action bar exists (the
+        // directory, which has no pagination) and next-page everywhere else.
+        if (revealById("create")) {
+          e.preventDefault();
+          break;
+        }
         /** @type {HTMLElement | null} */
         const next = document.querySelector("[data-key-next]");
         if (next !== null) next.click();

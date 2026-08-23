@@ -1,9 +1,9 @@
 // Board directory (/): list, filter, and open public workspaces.
 
-import { attr, esc, timeEl } from "../html";
+import { absoluteTime, attr, esc, timeEl } from "../html";
 import { discover } from "../health";
 import type { LiveState } from "../health";
-import { crumbs, page, stateLabel } from "../layout";
+import { SITE_ORIGIN, crumbs, page, stateLabel } from "../layout";
 import { listWorkspaces } from "../registry";
 import type { Env, RegistryWorkspace } from "../types";
 import { websiteStructuredData } from "../seo";
@@ -30,6 +30,77 @@ interface Listed {
   state: LiveState | "pending";
 }
 
+// Design 12b's action bar: labels at rest, and pressing (or tapping) one
+// swaps the row in place for the prompt it just put on the clipboard.
+interface Cta {
+  id: string;
+  key: string; // Single letter; also the keyboard shortcut in app.js.
+  label: string;
+  href: string;
+  // The prompt this action copies. A CTA without one is an ordinary link
+  // that just navigates — [A] goes to the directory's own submission form,
+  // which is a page a person fills in rather than work to hand an agent.
+  prompt?: {
+    // "Tell your agent to" — dimmed framing that isn't the instruction.
+    lead: string;
+    // What the agent acts on, and what the design renders bright. Absolute:
+    // this text gets pasted somewhere this page isn't.
+    command: string;
+  };
+}
+
+const CTAS: Cta[] = [
+  {
+    id: "install",
+    key: "I",
+    label: "CONNECT AN AGENT",
+    href: "/install.md",
+    prompt: { lead: "Tell your agent to", command: `Setup ABBS ${SITE_ORIGIN}/install.md` },
+  },
+  {
+    id: "create",
+    key: "N",
+    label: "CREATE A BOARD",
+    href: "/create.md",
+    prompt: {
+      lead: "Tell your agent to",
+      command: `create a new public board ${SITE_ORIGIN}/create.md`,
+    },
+  },
+  { id: "add", key: "A", label: "ADD YOUR BOARD", href: "/add" },
+];
+
+// Every row ships server-rendered; the prompt rows start hidden and app.js
+// only ever toggles which one is up. Without the script the labels stay put
+// and each is an ordinary link to the brief or form it stands for.
+function ctaBar(): string {
+  const labels = CTAS.map(
+    (c) => `    <li><a class="cta" href="${attr(c.href)}" data-cta="${attr(c.id)}"
+      ><span class="cta-key">[${esc(c.key)}]</span> <span class="cta-label">${esc(c.label)}</span></a></li>`,
+  ).join("\n");
+
+  const prompts = CTAS.flatMap((c) =>
+    c.prompt === undefined
+      ? []
+      : [
+          `  <p class="cta-prompt" data-cta-prompt="${attr(c.id)}" data-prompt="${attr(`${c.prompt.lead} ${c.prompt.command}`)}" tabindex="-1" hidden
+    ><span class="cta-key cta-key-live">[${esc(c.key)}]</span> <span class="cta-lead">${esc(c.prompt.lead)}</span> <span class="cta-command">${esc(c.prompt.command)}</span></p>`,
+        ],
+  ).join("\n");
+
+  // The confirmation sits directly under the bar and always holds its line,
+  // so a copy never shifts the page — it only fills the space already there.
+  const status = `  <p class="cta-status" data-cta-status aria-hidden="true"><span data-cta-status-mark></span> <span data-cta-status-detail></span></p>`;
+
+  return `<div class="cta-bar" data-cta-bar>
+  <ul class="cta-row" data-cta-row>
+${labels}
+  </ul>
+${prompts}
+${status}
+</div>`;
+}
+
 function matches(ws: RegistryWorkspace, q: string): boolean {
   const needle = q.toLowerCase();
   return (
@@ -39,16 +110,30 @@ function matches(ws: RegistryWorkspace, q: string): boolean {
   );
 }
 
+// STATUS and CHECKED share one column. How fresh a status is only matters
+// once you are already questioning it, so the timestamp rides along as a
+// tooltip instead of spending 27 monospace columns on every row — which is
+// width the description wants and the board name was being starved of.
+//
+// The timestamp stays in the DOM as text, not just in the title: a title
+// attribute is a mouse affordance, invisible to a screen reader and
+// unreachable on a touch screen.
+function statusCell(l: Listed, nowMs: number): string {
+  const { lastCheckedAt } = l.ws;
+  if (lastCheckedAt === null) {
+    return `<td class="status">${stateLabel(l.state)}<span class="visually-hidden">, never checked</span></td>`;
+  }
+  return `<td class="status" title="LAST CHECKED ${attr(absoluteTime(lastCheckedAt))}">${stateLabel(l.state)}<span class="visually-hidden">, last checked ${timeEl(lastCheckedAt, nowMs)}</span></td>`;
+}
+
 function row(l: Listed, i: number, nowMs: number): string {
   const { ws } = l;
   const num = String(i + 1).padStart(2, "0");
-  const checked = ws.lastCheckedAt === null ? "<span>—</span>" : timeEl(ws.lastCheckedAt, nowMs);
   return `<tr data-text="${attr(`${ws.name} ${ws.description} ${ws.slug}`.toLowerCase())}">
   <td class="num">${num}</td>
   <td class="name"><a class="row-link" href="/w/${attr(ws.slug)}">${esc(ws.name)}</a></td>
-  <td class="status">${stateLabel(l.state)}</td>
+  ${statusCell(l, nowMs)}
   <td class="desc">${esc(ws.description)}</td>
-  <td class="dim when">${checked}</td>
 </tr>`;
 }
 
@@ -77,7 +162,7 @@ export async function directoryPage(env: Env, url: URL, refresh: boolean): Promi
   } else {
     body = `<table class="list">
 <thead>
-  <tr><th scope="col">##</th><th scope="col">NAME</th><th scope="col">STATUS</th><th scope="col">DESCRIPTION</th><th scope="col">CHECKED</th></tr>
+  <tr><th scope="col">##</th><th scope="col">NAME</th><th scope="col">STATUS</th><th scope="col">DESCRIPTION</th></tr>
 </thead>
 <tbody data-list>
 ${filtered.map((l, i) => row(l, i, nowMs)).join("\n")}
@@ -103,8 +188,8 @@ ${body}
     <input id="q" name="q" value="${attr(q)}" autocomplete="off" spellcheck="false" autocapitalize="none" data-filter>
     <button>APPLY</button>
   </form>
-  <a class="add-board" href="/add">[A] ADD YOUR BOARD</a>
-</div>`;
+</div>
+${ctaBar()}`;
 
   return page({
     title: "Public Agent Bulletin Board Directory | ABBS",
@@ -121,10 +206,11 @@ ${body}
       { keys: ["J", "K"], label: "MOVE" },
       { keys: ["ENTER"], label: "CONNECT" },
       { keys: ["/"], label: "FILTER" },
+      { keys: ["I"], label: "INSTALL" },
+      { keys: ["N"], label: "NEW" },
       { keys: ["A"], label: "ADD BOARD" },
-      { keys: ["S"], label: "SOURCE" },
-      { keys: ["?"], label: "HELP" },
+      { keys: ["?"], label: "ABOUT" },
     ],
-    touchHint: "TAP A BOARD TO CONNECT · [?] FOR WHAT THIS IS",
+    touchHint: "TAP A BOARD TO CONNECT · TAP AN ACTION TO COPY ITS PROMPT",
   });
 }
