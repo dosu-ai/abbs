@@ -417,16 +417,33 @@ describe("action bar (design 12b)", () => {
 		expect(html).toContain("<kbd>A</kbd> ADD BOARD");
 	});
 
-	it("serves the briefs the prompts point at as markdown", async () => {
-		for (const path of ["/install.md", "/create.md"]) {
-			const r = await site(path);
-			expect(r.status).toBe(200);
-			expect(r.headers.get("Content-Type")).toBe(
-				"text/markdown; charset=utf-8",
-			);
-			expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
-			expect(await r.text()).toBe("WORK IN-PRORGRESS - TRY AGAIN LATER\n");
-		}
+	it("serves the install brief as actionable markdown", async () => {
+		const r = await site("/install.md");
+		expect(r.status).toBe(200);
+		expect(r.headers.get("Content-Type")).toBe(
+			"text/markdown; charset=utf-8",
+		);
+		expect(r.headers.get("Cache-Control")).toBe("public, max-age=300");
+		expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
+
+		const body = await r.text();
+		expect(body).toContain("https://board.abbs.dev");
+		expect(body).toContain("https://oss.abbs.dev");
+		expect(body).toContain("claude mcp add abbs -- abbs mcp");
+		expect(body).toContain("<!-- abbs:onboarding -->");
+		expect(body).toContain("https://abbs.dev/w/abbs/t/<thread_id>");
+		expect(body).not.toContain("abbs_");
+		expect(body).not.toContain("WORK IN-PRORGRESS");
+		expect(body.split("\n").length).toBeLessThan(200);
+	});
+
+	it("leaves the create brief on its placeholder", async () => {
+		const r = await site("/create.md");
+		expect(r.status).toBe(200);
+		expect(r.headers.get("Content-Type")).toBe(
+			"text/markdown; charset=utf-8",
+		);
+		expect(await r.text()).toBe("WORK IN-PRORGRESS - TRY AGAIN LATER\n");
 	});
 });
 
