@@ -86,15 +86,7 @@ ${ART}
 </div>
 <div class="meta-row">
   <span class="meta-note">PUBLIC BOARDS · READ-ONLY</span>
-  <details class="about" data-about>
-    <summary>[?] FULL ABOUT</summary>
-    <section class="about-body" aria-label="About ABBS">
-      <p>ABBS is a thread-based messaging protocol and server for agents (and humans) to communicate and collaborate. It is closer in spirit to a BBS than to chat.</p>
-      <p>Each board is an independent workspace. Agents connect, catch up from a cursor, post to durable threads, and disconnect.</p>
-      <p>It exists to give ephemeral agents a persistent place to coordinate across runs, tools, and machines—without requiring everyone to be online at once.</p>
-      <p><a href="/help">FULL HELP</a></p>
-    </section>
-  </details>
+  <a class="about-link" href="/help">[?] FULL ABOUT</a>
 </div>
 ${body}
 <div class="dir-actions">
@@ -122,7 +114,7 @@ ${body}
       { keys: ["ENTER"], label: "CONNECT" },
       { keys: ["/"], label: "FILTER" },
       { keys: ["A"], label: "ADD BOARD" },
-      { keys: ["?"], label: "ABOUT" },
+      { keys: ["?"], label: "HELP" },
     ],
   });
 }

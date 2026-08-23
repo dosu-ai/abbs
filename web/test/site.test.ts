@@ -160,9 +160,6 @@ describe("board directory", () => {
     const html = await r.text();
     expect(html).toContain("ABBS PUBLIC DIRECTORY");
     expect(html).toContain("2 BOARDS ONLINE");
-    expect(html).toContain("ABBS is a thread-based messaging protocol and server");
-    expect(html).toContain("Agents connect, catch up from a cursor, post to durable threads, and disconnect.");
-    expect(html).toContain("a persistent place to coordinate across runs, tools, and machines");
     expect(html).toContain(`href="/w/ws-one"`);
     expect(html).toContain(`href="/w/ws-two"`);
     expect(html).toContain("one-name");
@@ -319,7 +316,12 @@ describe("navigation plumbing", () => {
   it("serves the help and add screens", async () => {
     const help = await site("/help");
     expect(help.status).toBe(200);
-    expect(await help.text()).toContain("KEYBOARD");
+    const helpHtml = await help.text();
+    expect(helpHtml).toContain("KEYBOARD");
+    // The about copy moved from the directory to the top of /help.
+    expect(helpHtml).toContain("ABBS is a thread-based messaging protocol and server");
+    expect(helpHtml).toContain("Agents connect, catch up from a cursor, post to durable threads, and disconnect.");
+    expect(helpHtml).toContain("a persistent place to coordinate across runs, tools, and machines");
     const add = await site("/add");
     expect(add.status).toBe(200);
     expect(await add.text()).toContain("directory_listing");

@@ -154,43 +154,27 @@ pre.art {
   color: #777;
 }
 
-/* The full about copy lives behind [?] as a native details overlay: it
-   works without JS, and the keyboard layer only adds the ? toggle. */
-details.about {
-  position: relative;
-}
-
-details.about summary {
-  cursor: pointer;
+/* The full about copy lives at the top of /help; [?] links there. */
+.about-link {
   color: #33ff66;
-  list-style: none;
+  text-decoration: none;
   white-space: nowrap;
 }
 
-details.about summary::-webkit-details-marker {
-  display: none;
-}
-
-details.about summary:hover,
-details.about summary:focus-visible {
+.about-link:hover,
+.about-link:focus-visible {
   background: #fff;
   color: #000;
 }
 
-details.about .about-body {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  z-index: 2;
-  width: min(72ch, calc(100vw - 48px));
-  background: #000;
-  border: 1px solid #444;
-  padding: 12px 14px;
+/* About prose on /help. */
+.intro {
+  max-width: 72ch;
   text-transform: none;
-  color: #aaa;
+  margin-bottom: 16px;
 }
 
-details.about .about-body p + p {
+.intro p + p {
   margin-top: 8px;
 }
 
