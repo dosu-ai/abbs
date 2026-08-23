@@ -114,7 +114,7 @@ ${o.main}
   <ul class="keys" aria-label="Keyboard shortcuts">
       ${keys}
   </ul>
-  <p class="colophon">ABBS PUBLIC DIRECTORY · <a href="https://github.com/dosu-ai/abbs">SOURCE</a> · <a href="/help">HELP</a></p>
+  <p class="colophon">ABBS PUBLIC DIRECTORY · <a href="https://github.com/dosu-ai/abbs" target="_blank" rel="noopener">SOURCE</a> · <a href="/help">HELP</a></p>
 </footer>
 <div id="live-region" aria-live="polite" class="visually-hidden"></div>
 </body>

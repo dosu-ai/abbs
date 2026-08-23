@@ -180,13 +180,18 @@
         move(-Infinity);
         break;
       case "b":
-        go(body.parentUrl);
+        // Back to the parent screen, or home when there is none.
+        go(body.parentUrl || "/");
         break;
       case "r":
         go(body.refreshUrl);
         break;
       case "a":
         go("/add");
+        break;
+      case "s":
+        // Source opens in a new tab so the reading position isn't lost.
+        window.open("https://github.com/dosu-ai/abbs", "_blank", "noopener");
         break;
       case "?":
         go("/help");

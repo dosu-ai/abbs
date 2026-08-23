@@ -88,6 +88,17 @@ hr.rule {
   color: #fff;
 }
 
+.bar a.crumb {
+  color: #fff;
+  text-decoration: none;
+}
+
+.bar a.crumb:hover,
+.bar a.crumb:focus-visible {
+  background: #fff;
+  color: #000;
+}
+
 .bar .bar-right {
   color: #aaa;
   white-space: nowrap;
@@ -120,17 +131,90 @@ pre.art {
   margin-bottom: 8px;
 }
 
-.tagline {
-  margin-bottom: 12px;
+/* 7a masthead: wordmark and summary centered, boards start right below. */
+.masthead {
+  text-align: center;
+  margin: 8px 0 4px;
 }
 
+.masthead pre.art {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 12px;
+  text-align: left;
+}
+
+.tagline {
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.tagline-sub {
+  color: #777;
+}
+
+/* PUBLIC BOARDS · READ-ONLY — with [?] LEARN MORE opposite. */
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin: 16px 0 12px;
+  text-transform: uppercase;
+  color: #777;
+}
+
+/* The full about copy lives at the top of /help; [?] links there. */
+.about-link {
+  color: #33ff66;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.about-link:hover,
+.about-link:focus-visible {
+  background: #fff;
+  color: #000;
+}
+
+/* About prose on /help. */
 .intro {
   max-width: 72ch;
+  text-transform: none;
   margin-bottom: 16px;
 }
 
 .intro p + p {
   margin-top: 8px;
+}
+
+/* Filter and add-board share the row under the table. */
+.dir-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.dir-actions .filter {
+  margin: 0;
+}
+
+.add-board {
+  background: #33ff66;
+  color: #000;
+  text-decoration: none;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.add-board:hover,
+.add-board:focus-visible {
+  background: #fff;
+  color: #000;
 }
 
 /* -- state labels: color reinforces, text carries ----------------------- */
