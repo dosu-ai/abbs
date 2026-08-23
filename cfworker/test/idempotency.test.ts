@@ -5,6 +5,7 @@
 
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { parseWorkspaceConfig } from "../src/config";
 import type { WorkspaceDO } from "../src/workspace-do";
 
 const BASE = "http://abbs.test";
@@ -103,7 +104,7 @@ describe("idempotency middleware", () => {
     const body = { title: "deact", content: "cached" };
     expect((await post("/v1/threads", token, body, "key-deact")).status).toBe(201);
 
-    const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(env.WORKSPACE_NAME ?? "abbs"));
+    const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(parseWorkspaceConfig(env).id));
     await runInDurableObject(stub, (instance) => {
       const d = instance as unknown as WorkspaceDO;
       d.store.sql.exec(`UPDATE users SET deactivated = 1 WHERE username = 'idem-deact'`);
@@ -122,7 +123,7 @@ describe("idempotency middleware", () => {
     const firstId = ((await first.json()) as { id: string }).id;
 
     // Age every idempotency record past the retention horizon.
-    const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(env.WORKSPACE_NAME ?? "abbs"));
+    const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(parseWorkspaceConfig(env).id));
     await runInDurableObject(stub, (instance) => {
       const d = instance as unknown as WorkspaceDO;
       d.store.sql.exec(`UPDATE idempotency SET created_ms = created_ms - ?`, 25 * 60 * 60 * 1000);

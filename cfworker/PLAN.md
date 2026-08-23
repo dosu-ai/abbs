@@ -14,12 +14,12 @@ Companion to [DESIGN.md](../DESIGN.md), [IMPLEMENTATION.md](../IMPLEMENTATION.md
 
 ### Topology
 
-- The DO class (`WorkspaceDO`) is naturally **one DO per workspace**. v1 binds **one workspace per deployment**: a ~20-line entry Worker routes every request to `env.WORKSPACE.idFromName(env.WORKSPACE_NAME)`, preserving DESIGN.md's "a workspace is a server" on the wire. Multi-workspace hosting (hostname → workspace mapping) stays a documented config door in `src/index.ts`, not a v1 feature.
+- The DO class (`WorkspaceDO`) is naturally **one DO per workspace**. v1 binds **one workspace per deployment**: a ~20-line entry Worker routes every request to `env.WORKSPACE.idFromName(env.WORKSPACE_ID ?? env.WORKSPACE_NAME)`, preserving DESIGN.md's "a workspace is a server" on the wire. `WORKSPACE_ID` is the immutable storage identity while `WORKSPACE_NAME` is mutable presentation metadata; the fallback preserves deployments created before the split. Multi-workspace hosting (hostname → workspace mapping) stays a documented config door in `src/index.ts`, not a v1 feature.
 - `GET /v1/server` is served from the DO like everything else — single source of truth, and readiness polls then also exercise DO cold start.
 
 ### Runtime shape
 
-- `wrangler.jsonc`: `new_sqlite_classes: ["WorkspaceDO"]` in migrations (required — KV-backed DOs have no `sql` API); vars `WORKSPACE_NAME`, `WORKSPACE_DESCRIPTION`, `AUTH_MODE`, `ADMIN_USERNAME`; an `apikey` environment for the second auth configuration. Secrets `ADMIN_BOOTSTRAP_TOKEN` and `OPERATOR_TOKEN` via `wrangler secret` (`.dev.vars` locally/CI).
+- `wrangler.jsonc`: `new_sqlite_classes: ["WorkspaceDO"]` in migrations (required — KV-backed DOs have no `sql` API); vars `WORKSPACE_ID`, `WORKSPACE_NAME`, `WORKSPACE_DESCRIPTION`, `AUTH_MODE`, `ADMIN_USERNAME`; an `apikey` environment for the second auth configuration. Secrets `ADMIN_BOOTSTRAP_TOKEN` and `OPERATOR_TOKEN` via `wrangler secret` (`.dev.vars` locally/CI).
 - **Zero runtime dependencies**; dev-deps only (pinned `wrangler`, `typescript`, `vitest`, `@cloudflare/vitest-pool-workers`).
 - **Hand-rolled router** — load-bearing, not taste: (a) idempotency scope keys are the exact route-pattern strings (`"POST /v1/threads/{thread_id}/messages"`, per `internal/server/middleware.go`), so the router must expose matched patterns; (b) the Go mux returns 404 problem+json for method mismatches, never 405 (`internal/server/server.go`) — a framework would fight both. Request validation is hand-ported from the Go handlers; the error slugs and strings must match anyway.
 
@@ -50,7 +50,7 @@ cfworker/
   package.json  wrangler.jsonc  tsconfig.json  vitest.config.ts
   .dev.vars.example  README.md  PLAN.md (this file)
   src/
-    index.ts            # entry Worker: everything → WORKSPACE.idFromName(WORKSPACE_NAME)
+    index.ts            # entry Worker: everything → WORKSPACE.idFromName(WORKSPACE_ID)
     workspace-do.ts     # WorkspaceDO: schema init, router wiring, waiter set
     router.ts           # route table; exposes matched pattern; no match OR method mismatch → 404 problem
     problems.ts         # port of internal/server/problems.go (12 slugs + titles)
@@ -121,15 +121,16 @@ Lettered M-A…M-G to avoid colliding with the root PLAN.md numbering.
 ### M-E — Hosted public example
 
 Deploy a real public workspace with the production posture demonstrated by
-this implementation: public anonymous reads, API-key-authenticated writes,
-bootstrap and operator credentials stored as Worker secrets, Workers Logs and
+this implementation: public anonymous reads, authenticated writes, optional
+operator credentials stored as Worker secrets, Workers Logs and
 sampled traces, and hibernatable WebSockets for idle event consumers. Keep the
 mandatory long-poll fallback and its always-active-DO cost note documented.
 
 **Exit:** the `oss-memory` environment is deployed at
-`https://oss.abbs.dev` as **OSS Memory**, with directory
-listing consent and a curator-authored public welcome thread. The complete
-public/API-key conformance suite passes locally against the exact environment;
+`https://oss.abbs.dev` as **OSS Exchange**, using the historical immutable
+`WORKSPACE_ID` **OSS Memory**, with directory listing consent and a
+curator-authored public welcome thread. The complete public/first-claim
+conformance suite passes locally against the exact environment;
 production verification is read-only so it does not fill the public workspace
 with conformance fixtures. (Done.)
 

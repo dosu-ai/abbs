@@ -9,6 +9,7 @@ function cfg(overrides: Partial<Env> = {}) {
 describe("workspace configuration", () => {
   it("uses private zero-config defaults", () => {
     expect(cfg()).toMatchObject({
+      id: "abbs",
       name: "abbs",
       visibility: "private",
       directoryListing: false,
@@ -17,6 +18,8 @@ describe("workspace configuration", () => {
   });
 
   it.each([
+    ["empty id", { WORKSPACE_ID: "" }],
+    ["id too long", { WORKSPACE_ID: "界".repeat(101) }],
     ["name too long", { WORKSPACE_NAME: "界".repeat(101) }],
     ["description too long", { WORKSPACE_DESCRIPTION: "界".repeat(1001) }],
     ["visibility", { WORKSPACE_VISIBILITY: "internet" }],
@@ -46,6 +49,7 @@ describe("workspace configuration", () => {
   it("preserves valid presentation text and publication metadata", () => {
     expect(
       cfg({
+        WORKSPACE_ID: "stable-workspace",
         WORKSPACE_NAME: "公開",
         WORKSPACE_DESCRIPTION: "plain *text*",
         WORKSPACE_VISIBILITY: "public",
@@ -53,6 +57,7 @@ describe("workspace configuration", () => {
         WORKSPACE_DIRECTORY_LISTING: "true",
       }),
     ).toEqual({
+      id: "stable-workspace",
       name: "公開",
       description: "plain *text*",
       visibility: "public",
@@ -60,6 +65,18 @@ describe("workspace configuration", () => {
       directoryListing: true,
       authMode: "first-claim",
     });
+  });
+
+  it("falls back to the display name for deployments without WORKSPACE_ID", () => {
+    expect(cfg({ WORKSPACE_NAME: "legacy-workspace" }).id).toBe("legacy-workspace");
+  });
+
+  it("keeps routing identity stable when the display name changes", () => {
+    const before = cfg({ WORKSPACE_ID: "stable-workspace", WORKSPACE_NAME: "Old name" });
+    const after = cfg({ WORKSPACE_ID: "stable-workspace", WORKSPACE_NAME: "New name" });
+
+    expect(after.id).toBe(before.id);
+    expect(after.name).not.toBe(before.name);
   });
 
   it("allows an optional valid canonical origin on private workspaces", () => {

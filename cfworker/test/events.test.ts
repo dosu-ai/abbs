@@ -5,6 +5,7 @@
 
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { parseWorkspaceConfig } from "../src/config";
 import type { WorkspaceDO } from "../src/workspace-do";
 import { postMessage } from "../src/store/messages";
 
@@ -12,7 +13,7 @@ const BASE = "http://abbs.test";
 
 describe("events long-poll", () => {
   it("wakes when an event is appended between query and park", async () => {
-    const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(env.WORKSPACE_NAME ?? "abbs"));
+    const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(parseWorkspaceConfig(env).id));
 
     const claim = async (username: string) => {
       const resp = await stub.fetch(`${BASE}/v1/users`, {
@@ -71,7 +72,7 @@ describe("events long-poll", () => {
   });
 
   it("echoes the cursor on an empty timed poll", async () => {
-    const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(env.WORKSPACE_NAME ?? "abbs"));
+    const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(parseWorkspaceConfig(env).id));
     const resp = await stub.fetch(`${BASE}/v1/users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -1,7 +1,8 @@
 // Centralized operator-binding parsing. Both the entry Worker (which chooses
-// the Durable Object id) and the Durable Object (which serves discovery and
-// authorizes reads) call this exact function, so they cannot silently apply
-// different defaults or validation.
+// the Durable Object id from the immutable workspace id) and the Durable
+// Object (which serves discovery using the mutable display name and authorizes
+// reads) call this exact function, so they cannot silently apply different
+// defaults or validation.
 
 import type { Env } from "./types";
 import { AUTH_API_KEY, AUTH_FIRST_CLAIM } from "./types";
@@ -10,6 +11,7 @@ export const VISIBILITY_PRIVATE = "private";
 export const VISIBILITY_PUBLIC = "public";
 
 export interface WorkspaceConfig {
+  id: string;
   name: string;
   description?: string;
   visibility: typeof VISIBILITY_PRIVATE | typeof VISIBILITY_PUBLIC;
@@ -22,6 +24,14 @@ export function parseWorkspaceConfig(env: Env): WorkspaceConfig {
   const name = env.WORKSPACE_NAME ?? "abbs";
   if (countCodePoints(name) < 1 || countCodePoints(name) > 100) {
     throw new Error("WORKSPACE_NAME must be 1..100 Unicode code points");
+  }
+
+  // Backwards compatibility: deployments created before WORKSPACE_ID was
+  // introduced keep routing by their existing WORKSPACE_NAME. Production
+  // environments should set WORKSPACE_ID explicitly and never change it.
+  const id = env.WORKSPACE_ID ?? name;
+  if (countCodePoints(id) < 1 || countCodePoints(id) > 100) {
+    throw new Error("WORKSPACE_ID must be 1..100 Unicode code points");
   }
 
   const description = env.WORKSPACE_DESCRIPTION ?? "";
@@ -62,6 +72,7 @@ export function parseWorkspaceConfig(env: Env): WorkspaceConfig {
   const authMode = rawMode === AUTH_API_KEY ? AUTH_API_KEY : AUTH_FIRST_CLAIM;
 
   return {
+    id,
     name,
     ...(description !== "" ? { description } : {}),
     visibility,
