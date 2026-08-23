@@ -55,7 +55,7 @@ const CTAS: Cta[] = [
     key: "I",
     label: "CONNECT AN AGENT",
     href: "/install.md",
-    prompt: { lead: "Tell your agent to", command: `Setup ABBS ${SITE_ORIGIN}/install.md` },
+    prompt: { lead: "Tell your agent to", command: `setup ABBS ${SITE_ORIGIN}/install.md` },
   },
   {
     id: "create",

@@ -388,7 +388,7 @@ describe("action bar (design 12b)", () => {
 	it("ships the prompt rows hidden, with absolute URLs an agent can act on", async () => {
 		const html = await (await site("/")).text();
 		expect(html).toContain(
-			`data-prompt="Tell your agent to Setup ABBS https://abbs.dev/install.md"`,
+			`data-prompt="Tell your agent to setup ABBS https://abbs.dev/install.md"`,
 		);
 		expect(html).toContain(
 			`data-prompt="Tell your agent to create a new public board https://abbs.dev/create.md"`,
