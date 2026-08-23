@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -22,8 +23,17 @@ import (
 	"github.com/dosu-ai/abbs/internal/workspace"
 )
 
-//go:embed templates/*.html static/*.css
+//go:embed templates/*.html static/*.css static/*.svg static/fonts/*
 var assets embed.FS
+
+// staticTypes is the closed set of asset kinds the viewer serves; anything
+// else in the embedded tree is not reachable over HTTP.
+var staticTypes = map[string]string{
+	".css":  "text/css; charset=utf-8",
+	".svg":  "image/svg+xml",
+	".woff": "font/woff",
+	".txt":  "text/plain; charset=utf-8",
+}
 
 const contentSecurityPolicy = "default-src 'self'; base-uri 'none'; connect-src 'none'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self'; object-src 'none'; script-src 'none'; style-src 'self'"
 
@@ -128,7 +138,7 @@ func New(cfg Config) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", h.overview)
-	mux.HandleFunc("GET /static/app.css", h.stylesheet)
+	mux.HandleFunc("GET /static/{path...}", h.static)
 	mux.HandleFunc("GET /workspaces/{workspace}/threads", h.listThreads)
 	mux.HandleFunc("GET /workspaces/{workspace}/threads/{thread}", h.showThread)
 	mux.HandleFunc("GET /workspaces/{workspace}/tags", h.listTags)
@@ -149,6 +159,7 @@ func securityHeaders(next http.Handler) http.Handler {
 
 func (h *Handler) parseTemplates() (map[string]*template.Template, error) {
 	funcs := template.FuncMap{
+		"seq":              rowNumber,
 		"formatTime":       formatTime,
 		"formatEditedTime": formatEditedTime,
 		"markdown":         h.markdown.Render,
@@ -192,13 +203,22 @@ func (h *Handler) renderError(w http.ResponseWriter, status int, o *origin, mess
 	})
 }
 
-func (h *Handler) stylesheet(w http.ResponseWriter, _ *http.Request) {
-	b, err := assets.ReadFile("static/app.css")
-	if err != nil {
-		http.Error(w, "stylesheet unavailable", http.StatusInternalServerError)
+// static serves the embedded stylesheet, favicon, and bitmap webfont. The
+// CSP allows only same-origin styles, images, and fonts, so this is the whole
+// asset surface — there is no script.
+func (h *Handler) static(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(path.Clean("/"+r.PathValue("path")), "/")
+	contentType, ok := staticTypes[path.Ext(name)]
+	if !ok {
+		h.renderError(w, http.StatusNotFound, nil, "No such UI asset.")
 		return
 	}
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	b, err := assets.ReadFile("static/" + name)
+	if err != nil {
+		h.renderError(w, http.StatusNotFound, nil, "No such UI asset.")
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	_, _ = w.Write(b)
 }
@@ -439,12 +459,20 @@ func withQuery(path string, q url.Values) string {
 	return path + "?" + q.Encode()
 }
 
+// rowNumber renders the ## column of a list: 1-based, zero-padded, like the
+// public directory on abbs.dev.
+func rowNumber(index int) string {
+	return fmt.Sprintf("%02d", index+1)
+}
+
+// formatTime keeps the sortable, terminal-grid shape the website uses, but in
+// the developer's own zone — this viewer is read next to a local server log.
 func formatTime(value string) string {
 	t, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
 		return value
 	}
-	return t.Local().Format("Jan 2, 2006 15:04:05 MST")
+	return t.Local().Format("2006-01-02 15:04:05 MST")
 }
 
 func formatEditedTime(value *string) string {

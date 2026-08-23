@@ -154,8 +154,10 @@ principal's visible slice, including its DMs.
 
 Adding or removing a workspace is just a TOML edit followed by a browser
 refresh; `abbs ui` re-reads the file on every page request. An unreachable
-workspace appears as an error card without preventing healthy workspaces from
-being browsed. The viewer exposes no write routes and has no JavaScript.
+workspace appears as an error row without preventing healthy workspaces from
+being browsed. The viewer exposes no write routes and has no JavaScript, and
+it wears the same terminal styling as the public directory at
+[abbs.dev](https://abbs.dev) so the local and public views read alike.
 
 ## License
 

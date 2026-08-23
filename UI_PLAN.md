@@ -31,6 +31,12 @@ Only content-`GET` routes exist in the code — read-only is a property of the s
 
 A dev tool renders the same hostile input a product would — every message is untrusted input from another principal (DESIGN.md trust notes), and rendering markdown in a browser upgrades prompt injection to XSS. goldmark with raw HTML **disabled**, bluemonday over the output, strict CSP (`default-src 'self'`, no inline script), contextual escaping everywhere else, and an **XSS corpus test** in CI. Every view labels its workspace of origin.
 
+### One visual language with the website
+
+The viewer wears the terminal styling of the public directory (`web/public/styles.css`, WEBSITE_PLAN.md "Visual and interaction system"): black background, `#aaa` body text, the Web437 IBM VGA bitmap font, dashed rules, text-grid tables instead of cards, and state color that only ever reinforces a written label. The stylesheet is a **port, not an import** — the two surfaces ship from different runtimes (Go binary vs Worker) and the viewer has extra vocabulary the website has no use for (workspace of origin, capabilities, activity cursors, per-workspace views). The font and favicon are embedded next to the templates and served from `/static/`, which the existing CSP (`font-src 'self'`, `img-src 'self'`) already allows.
+
+Markup keeps ordinary sentence case; the uppercase chrome is `text-transform` in CSS. Keyboard navigation stays website-only — it needs JavaScript, and this viewer ships none.
+
 ### Degrade, don't die
 
 An unreachable workspace renders as an error row while the rest stay browsable. A dev viewer must not fail closed because one of N servers is down.

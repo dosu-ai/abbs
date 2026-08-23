@@ -1,49 +1,55 @@
 {{define "title"}}Threads · {{.Origin.ProfileName}}{{end}}
+{{define "crumb"}}<h1>Connected: <a class="crumb" href="{{threadsHomeURL .Origin.ProfileName}}">{{if .Origin.ServerLabel}}{{.Origin.ServerLabel}}{{else}}{{.Origin.ProfileName}}{{end}}</a> / threads</h1>{{end}}
+{{define "barRight"}}Status: <span class="st st-online">Reachable</span>{{end}}
 {{define "content"}}
 {{template "origin" .Origin}}
 {{template "workspaceNav" .Origin}}
 
-<section class="page-heading">
-  <div>
-    <span class="eyebrow">{{.Origin.ServerLabel}}</span>
-    <h1>Threads</h1>
-    <p>Ordered by the server’s activity sequence, newest first.</p>
-  </div>
-  <a class="button secondary" href="{{threadsURL .Origin.ProfileName .Tags ""}}">Refresh</a>
-</section>
+<div class="meta-row">
+  <span>Activity order, newest first · read only</span>
+  <a class="act" href="{{threadsURL .Origin.ProfileName .Tags ""}}">Refresh</a>
+</div>
 
-<form class="filter" method="get">
+<form class="filter" method="get" role="search">
   <label for="tag">Filter by tag</label>
-  <div>
-    <input id="tag" name="tag" value="{{if .HasFilter}}{{index .Tags 0}}{{end}}" placeholder="for example: architecture">
-    <button type="submit">Apply</button>
-    {{if .HasFilter}}<a href="{{threadsHomeURL .Origin.ProfileName}}">Clear</a>{{end}}
-  </div>
+  <input id="tag" name="tag" value="{{if .HasFilter}}{{index .Tags 0}}{{end}}" autocomplete="off" spellcheck="false" placeholder="architecture">
+  <button type="submit">Apply</button>
+  {{if .HasFilter}}<a class="act" href="{{threadsHomeURL .Origin.ProfileName}}">Clear</a>{{end}}
 </form>
 
 {{if .HasFilter}}
-<p class="active-filter">Showing threads tagged {{range .Tags}}<span class="pill">{{.}}</span>{{end}}</p>
+<p class="active-filter">Showing threads tagged {{range .Tags}}<span class="tag">{{.}}</span> {{end}}</p>
 {{end}}
 
-<div class="thread-list">
+{{if .Threads}}
+<table class="list">
+<thead>
+  <tr>
+    <th scope="col">Title</th>
+    <th scope="col">Tags</th>
+    <th scope="col">By</th>
+    <th scope="col">Started</th>
+    <th scope="col">Activity</th>
+  </tr>
+</thead>
+<tbody>
   {{range .Threads}}
-  <article class="thread-row">
-    <div class="thread-main">
-      <div class="thread-title-line">
-        <a class="thread-title" href="{{threadURL $.Origin.ProfileName .ID ""}}">{{.Title}}</a>
-        {{if eq .Kind "dm"}}<span class="badge dm">DM</span>{{end}}
-      </div>
-      <p class="metadata">Started by @{{.Creator}} · {{formatTime .CreatedAt}} · activity cursor {{.LastActivitySeq}}</p>
-      {{if eq .Kind "dm"}}<p class="metadata">Participants: {{range $i, $p := .Participants}}{{if $i}}, {{end}}@{{$p}}{{end}}</p>{{end}}
-      {{if .Tags}}<div class="tag-row">{{range .Tags}}<a class="pill" href="{{threadsForTagURL $.Origin.ProfileName .}}">{{.}}</a>{{end}}</div>{{end}}
-    </div>
-  </article>
-  {{else}}
-  <section class="empty-state">
-    <h2>No threads found</h2>
-    <p>This principal has no visible threads matching the current filter.</p>
-  </section>
+  <tr>
+    <td class="title">
+      <a href="{{threadURL $.Origin.ProfileName .ID ""}}">{{.Title}}</a>
+      {{if eq .Kind "dm"}}<span class="badge">DM</span>
+      <div class="dim">participants: {{range $i, $p := .Participants}}{{if $i}}, {{end}}@{{$p}}{{end}}</div>{{end}}
+    </td>
+    <td class="tags">{{range .Tags}}<a class="tag" href="{{threadsForTagURL $.Origin.ProfileName .}}">{{.}}</a> {{end}}</td>
+    <td class="by"><span class="mention">@{{.Creator}}</span></td>
+    <td class="dim"><time datetime="{{.CreatedAt}}">{{formatTime .CreatedAt}}</time></td>
+    <td class="dim">{{.LastActivitySeq}}</td>
+  </tr>
   {{end}}
-</div>
+</tbody>
+</table>
+{{else}}
+<p class="empty">{{if .HasFilter}}No threads carry this tag.{{else}}No threads are visible to this principal.{{end}}</p>
+{{end}}
 {{template "pager" .}}
 {{end}}

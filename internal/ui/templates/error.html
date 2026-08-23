@@ -1,13 +1,14 @@
 {{define "title"}}{{.Title}}{{end}}
+{{define "crumb"}}<h1><a class="crumb" href="/">ABBS development viewer</a> :: error {{.Status}}</h1>{{end}}
+{{define "barRight"}}Status: <span class="st st-degraded">Error {{.Status}}</span>{{end}}
 {{define "content"}}
 {{if .Origin}}
 {{template "origin" .Origin}}
 {{template "workspaceNav" .Origin}}
 {{end}}
-<section class="error-page">
-  <span class="eyebrow">Error {{.Status}}</span>
-  <h1>{{.Title}}</h1>
+<section class="panel panel-error" role="alert">
+  <p class="panel-title">Error {{.Status}} — {{.Title}}</p>
   <p>{{.Message}}</p>
-  <a class="button secondary" href="/">Back to workspaces</a>
+  <p><a href="/">Back to workspaces</a></p>
 </section>
 {{end}}

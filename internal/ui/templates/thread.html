@@ -1,45 +1,48 @@
 {{define "title"}}{{.Thread.Title}} · {{.Origin.ProfileName}}{{end}}
+{{define "crumb"}}<h1><a class="crumb" href="{{threadsHomeURL .Origin.ProfileName}}">{{if .Origin.ServerLabel}}{{.Origin.ServerLabel}}{{else}}{{.Origin.ProfileName}}{{end}}</a> :: {{.Thread.Title}}</h1>{{end}}
+{{define "barRight"}}Status: <span class="st st-online">Reachable</span>{{end}}
 {{define "content"}}
 {{template "origin" .Origin}}
 {{template "workspaceNav" .Origin}}
 
-<article class="thread-header">
-  <div class="thread-title-line">
-    <h1>{{.Thread.Title}}</h1>
-    {{if eq .Thread.Kind "dm"}}<span class="badge dm">Private DM</span>{{end}}
-  </div>
-  <p class="metadata">Created by @{{.Thread.Creator}} · {{formatTime .Thread.CreatedAt}} · activity cursor {{.Thread.LastActivitySeq}}</p>
-  {{if eq .Thread.Kind "dm"}}<p class="metadata">Fixed participants: {{range $i, $p := .Thread.Participants}}{{if $i}}, {{end}}@{{$p}}{{end}}</p>{{end}}
-  {{if .Thread.Tags}}<div class="tag-row">{{range .Thread.Tags}}<a class="pill" href="{{threadsForTagURL $.Origin.ProfileName .}}">{{.}}</a>{{end}}</div>{{end}}
-</article>
+<p class="thread-meta">
+  {{if .Thread.Tags}}tags: {{range .Thread.Tags}}<a class="tag" href="{{threadsForTagURL $.Origin.ProfileName .}}">{{.}}</a> {{end}}· {{end}}
+  started by <span class="mention">@{{.Thread.Creator}}</span> · <time datetime="{{.Thread.CreatedAt}}">{{formatTime .Thread.CreatedAt}}</time> · activity cursor {{.Thread.LastActivitySeq}}
+  {{if eq .Thread.Kind "dm"}}<span class="badge">Private DM</span>{{end}}
+</p>
+{{if eq .Thread.Kind "dm"}}
+<p class="thread-meta">fixed participants: {{range $i, $p := .Thread.Participants}}{{if $i}}, {{end}}<span class="mention">@{{$p}}</span>{{end}}</p>
+{{end}}
 
-<section class="messages" aria-label="Messages in sequence order">
+{{if .Messages}}
+<div class="messages" aria-label="Messages in sequence order">
   {{range .Messages}}
-  <article class="message {{if .Deleted}}tombstone{{end}}">
-    <header>
-      <strong>@{{.Author}}</strong>
-      <span>{{formatTime .CreatedAt}}</span>
-      <span>seq {{.Seq}}</span>
-      {{if .EditedAt}}<span class="edited">Edited {{formatEditedTime .EditedAt}}</span>{{end}}
-    </header>
+  <article class="msg{{if .Deleted}} msg-tombstone{{end}}" id="m-{{.ID}}">
     {{if .Deleted}}
-      {{if eq .DeletedBy .Author}}
-      <p class="tombstone-copy">This message was deleted by its author @{{.DeletedBy}}.</p>
-      {{else}}
-      <p class="tombstone-copy">This message was removed in moderation by @{{.DeletedBy}}.</p>
-      {{end}}
+    <p class="msg-head">
+      <a class="msg-anchor" href="#m-{{.ID}}" aria-label="deleted message permalink">§</a>
+      <span class="tomb">{{if eq .DeletedBy .Author}}[This message was deleted by its author @{{.DeletedBy}}]{{else}}[This message was removed in moderation by @{{.DeletedBy}}]{{end}}</span>
+      <time datetime="{{.CreatedAt}}">{{formatTime .CreatedAt}}</time> · seq {{.Seq}}
+    </p>
     {{else}}
-      <div class="message-content">{{markdown .Content}}</div>
+    <p class="msg-head">
+      <a class="msg-anchor" href="#m-{{.ID}}" aria-label="message permalink">§</a>
+      <span class="mention">@{{.Author}}</span>
+      <time datetime="{{.CreatedAt}}">{{formatTime .CreatedAt}}</time> · seq {{.Seq}}
+      {{if .EditedAt}}· <span class="edited">Edited {{formatEditedTime .EditedAt}}</span>{{end}}
+    </p>
+    <div class="msg-body">{{markdown .Content}}</div>
     {{end}}
     {{if .Reactions}}
-    <div class="reactions" aria-label="Reaction tallies">
+    <p class="reactions" aria-label="Reaction tallies">
       {{range .Reactions}}<span class="reaction"><span aria-hidden="true">{{.Emoji}}</span> {{.Count}}</span>{{end}}
-    </div>
+    </p>
     {{end}}
   </article>
-  {{else}}
-  <section class="empty-state"><h2>No messages</h2></section>
   {{end}}
-</section>
+</div>
+{{else}}
+<p class="empty">No messages on this page.</p>
+{{end}}
 {{template "pager" .}}
 {{end}}
