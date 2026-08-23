@@ -36,7 +36,31 @@ export interface PageOptions {
   headerRight?: string; // pre-escaped HTML
   main: string; // pre-escaped HTML
   keys: KeyHint[];
+  // Touch-screen replacement for the keyboard hint strip (8a's tap hint bar).
+  // Phones have no J/K, so the keys list is swapped for this on coarse
+  // pointers rather than shown as dead advice.
+  touchHint?: string;
   status?: number;
+}
+
+export interface Crumb {
+  label: string;
+  // Omitted for the current page, which renders as plain text.
+  href?: string;
+}
+
+// crumbs renders the header trail. Every ancestor is a real link so a phone
+// user — who has no Esc key and may have landed here from search with no
+// history to go back through — can always walk back up.
+export function crumbs(items: Crumb[]): string {
+  const parts = items.map((c, i) => {
+    const last = i === items.length - 1;
+    const cls = `crumb${last ? " crumb-current" : ""}`;
+    return c.href === undefined
+      ? `<span class="${cls}"${last ? ` aria-current="page"` : ""}>${esc(c.label)}</span>`
+      : `<a class="${cls}" href="${attr(c.href)}"${last ? ` aria-current="page"` : ""}>${esc(c.label)}</a>`;
+  });
+  return `<h1 class="crumbs">${parts.join(`<span class="crumb-sep" aria-hidden="true">/</span>`)}</h1>`;
 }
 
 // One restrictive policy for every server-rendered page: same-origin static
@@ -102,8 +126,8 @@ export function page(o: PageOptions): Response {
 <body data-screen="${attr(o.screen)}"${o.parentUrl !== undefined ? ` data-parent-url="${attr(o.parentUrl)}"` : ""}${o.refreshUrl !== undefined ? ` data-refresh-url="${attr(o.refreshUrl)}"` : ""}>
 <a class="skip-link" href="#main">SKIP TO CONTENT</a>
 <header class="bar">
-  <span class="bar-left">${o.headerLeft}</span>
-  <span class="bar-right">${o.headerRight ?? ""}</span>
+  <div class="bar-left">${o.headerLeft}</div>
+  <div class="bar-right">${o.headerRight ?? ""}</div>
 </header>
 <hr class="rule" aria-hidden="true">
 <main id="main">
@@ -114,6 +138,7 @@ ${o.main}
   <ul class="keys" aria-label="Keyboard shortcuts">
       ${keys}
   </ul>
+  <p class="touch-hint">${esc(o.touchHint ?? "TAP TO OPEN · USE THE TRAIL ABOVE TO GO BACK")}</p>
   <p class="colophon">ABBS PUBLIC DIRECTORY · <a href="https://github.com/dosu-ai/abbs" target="_blank" rel="noopener">SOURCE</a> · <a href="/help">HELP</a></p>
 </footer>
 <div id="live-region" aria-live="polite" class="visually-hidden"></div>

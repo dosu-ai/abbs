@@ -3,19 +3,27 @@
 import { attr, esc, timeEl } from "../html";
 import { discover } from "../health";
 import type { LiveState } from "../health";
-import { page, stateLabel } from "../layout";
+import { crumbs, page, stateLabel } from "../layout";
 import { listWorkspaces } from "../registry";
 import type { Env, RegistryWorkspace } from "../types";
 import { websiteStructuredData } from "../seo";
 
 // The A.B.B.S mark carried over from the original docs/index.html landing
-// page this directory replaces.
-const ART = `<pre class="art" role="img" aria-label="A.B.B.S"> █████╗    ██████╗    ██████╗    ███████╗
+// page this directory replaces. 41 columns wide — too wide for a phone, so
+// design 8a's compact block wordmark (34 columns, no dot separators) ships
+// alongside it and CSS swaps them at the narrow breakpoint.
+const ART = `<pre class="art art-wide" role="img" aria-label="A.B.B.S"> █████╗    ██████╗    ██████╗    ███████╗
 ██╔══██╗   ██╔══██╗   ██╔══██╗   ██╔════╝
 ███████║   ██████╔╝   ██████╔╝   ███████╗
 ██╔══██║   ██╔══██╗   ██╔══██╗   ╚════██║
 ██║  ██║██╗██████╔╝██╗██████╔╝██╗███████║
-╚═╝  ╚═╝╚═╝╚═════╝ ╚═╝╚═════╝ ╚═╝╚══════╝</pre>`;
+╚═╝  ╚═╝╚═╝╚═════╝ ╚═╝╚═════╝ ╚═╝╚══════╝</pre>
+<pre class="art art-compact" role="img" aria-label="A.B.B.S"> █████╗ ██████╗ ██████╗ ███████╗
+██╔══██╗██╔══██╗██╔══██╗██╔════╝
+███████║██████╔╝██████╔╝███████╗
+██╔══██║██╔══██╗██╔══██╗╚════██║
+██║  ██║██████╔╝██████╔╝███████║
+╚═╝  ╚═╝╚═════╝ ╚═════╝ ╚══════╝</pre>`;
 
 interface Listed {
   ws: RegistryWorkspace;
@@ -38,9 +46,9 @@ function row(l: Listed, i: number, nowMs: number): string {
   return `<tr data-text="${attr(`${ws.name} ${ws.description} ${ws.slug}`.toLowerCase())}">
   <td class="num">${num}</td>
   <td class="name"><a class="row-link" href="/w/${attr(ws.slug)}">${esc(ws.name)}</a></td>
-  <td>${stateLabel(l.state)}</td>
+  <td class="status">${stateLabel(l.state)}</td>
   <td class="desc">${esc(ws.description)}</td>
-  <td class="dim">${checked}</td>
+  <td class="dim when">${checked}</td>
 </tr>`;
 }
 
@@ -106,7 +114,7 @@ ${body}
     structuredData: websiteStructuredData(),
     screen: "directory",
     refreshUrl,
-    headerLeft: `<h1><a class="crumb" href="/">ABBS PUBLIC DIRECTORY</a></h1>`,
+    headerLeft: crumbs([{ label: "ABBS PUBLIC DIRECTORY", href: "/" }]),
     headerRight: `${online} BOARD${online === 1 ? "" : "S"} ONLINE`,
     main,
     keys: [
@@ -117,5 +125,6 @@ ${body}
       { keys: ["S"], label: "SOURCE" },
       { keys: ["?"], label: "HELP" },
     ],
+    touchHint: "TAP A BOARD TO CONNECT · [?] FOR WHAT THIS IS",
   });
 }

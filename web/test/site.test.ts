@@ -244,6 +244,39 @@ describe("thread reader", () => {
     const r = await site("/w/ws-one/t/not-a-uuid");
     expect(r.status).toBe(404);
   });
+
+  // On a phone there is no Esc key, and a visitor from search has no history
+  // to go back through: the trail is the only way back up.
+  it("links every breadcrumb ancestor back up the hierarchy", async () => {
+    const html = await (await site(`/w/ws-one/t/${THREAD_ID}`)).text();
+    expect(html).toContain(`<a class="crumb" href="/">ABBS</a>`);
+    expect(html).toContain(`<a class="crumb" href="/w/ws-one">`);
+    // The thread itself is the current page, so it is text, not a link.
+    expect(html).toContain(`class="crumb crumb-current" aria-current="page"`);
+  });
+
+  it("links the board breadcrumb home", async () => {
+    const html = await (await site("/w/ws-one")).text();
+    expect(html).toContain(`<a class="crumb" href="/">ABBS</a>`);
+  });
+});
+
+describe("mobile (design 8a)", () => {
+  it("ships a narrow wordmark alongside the wide one for phones", async () => {
+    const html = await (await site("/")).text();
+    expect(html).toContain(`class="art art-wide"`);
+    expect(html).toContain(`class="art art-compact"`);
+    const css = await (await site("/styles.css")).text();
+    expect(css).toContain("pre.art-compact");
+  });
+
+  it("offers a tap hint in place of the keyboard strip", async () => {
+    const html = await (await site("/")).text();
+    expect(html).toContain(`class="touch-hint"`);
+    const css = await (await site("/styles.css")).text();
+    // Keyed on pointer, not width: a narrow desktop window keeps its keys.
+    expect(css).toContain("(hover: none) and (pointer: coarse)");
+  });
 });
 
 describe("api", () => {

@@ -3,7 +3,7 @@
 
 import { attr, esc, timeEl } from "../html";
 import { discover } from "../health";
-import { page, stateLabel } from "../layout";
+import { crumbs, page, stateLabel } from "../layout";
 import { getWorkspaceBySlug } from "../registry";
 import type { Env, RegistryWorkspace, UpstreamThread } from "../types";
 import { fetchPublicThreads, fetchTags, validatePageParams } from "../upstream";
@@ -30,7 +30,7 @@ function threadRow(ws: RegistryWorkspace, t: UpstreamThread, nowMs: number): str
   <td class="title"><a class="row-link" href="/w/${attr(ws.slug)}/t/${attr(t.id)}">${esc(t.title)}</a></td>
   <td class="tags">${tags}</td>
   <td class="by"><span class="mention">@${esc(t.creator)}</span></td>
-  <td class="dim">${timeEl(t.created_at, nowMs)}</td>
+  <td class="dim when">${timeEl(t.created_at, nowMs)}</td>
 </tr>`;
 }
 
@@ -158,9 +158,13 @@ ${body}`;
     screen: "board",
     parentUrl: "/",
     refreshUrl: boardUrl(slug, { tag, q, page: params.page, refresh: true }),
-    headerLeft: `<h1>CONNECTED: <span class="ws-name">${esc(name)}</span> / PUBLIC THREADS</h1>`,
+    headerLeft: `<span class="bar-prefix">CONNECTED:</span>${crumbs([
+      { label: "ABBS", href: "/" },
+      { label: name },
+    ])}`,
     headerRight: `STATUS: ${stateLabel(displayState)}`,
     main,
+    touchHint: "TAP A THREAD TO READ IT · TAP ABBS ABOVE FOR ALL BOARDS",
     keys: [
       { keys: ["J", "K"], label: "MOVE" },
       { keys: ["ENTER"], label: "READ" },
