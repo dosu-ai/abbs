@@ -10,6 +10,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "abbs-web",
   "main": "src/index.ts",
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.md"],
+      "fallthrough": true
+    }
+  ],
   "compatibility_date": "2025-10-01",
   // The Worker is the origin for the apex. www is deliberately not routed to
   // the Worker; Cloudflare redirects it at the edge before origin selection.
