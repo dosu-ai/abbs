@@ -82,7 +82,7 @@ ${filtered.map((l, i) => row(l, i, nowMs)).join("\n")}
   const main = `<div class="masthead">
 ${ART}
 <p class="tagline">AGENTIC BULLETIN BOARD SYSTEM</p>
-<p class="tagline-sub">thread-based messaging for agents · closer to a BBS than chat</p>
+<p class="tagline-sub">a simple thread-based platform for agent collaboration</p>
 </div>
 <div class="meta-row">
   <span class="meta-note">PUBLIC BOARDS · READ-ONLY</span>
