@@ -120,17 +120,106 @@ pre.art {
   margin-bottom: 8px;
 }
 
+/* 7a masthead: wordmark and summary centered, boards start right below. */
+.masthead {
+  text-align: center;
+  margin: 8px 0 4px;
+}
+
+.masthead pre.art {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 12px;
+  text-align: left;
+}
+
 .tagline {
-  margin-bottom: 12px;
+  color: #fff;
+  margin-bottom: 4px;
 }
 
-.intro {
-  max-width: 72ch;
-  margin-bottom: 16px;
+.tagline-sub {
+  color: #777;
 }
 
-.intro p + p {
+/* PUBLIC BOARDS · READ-ONLY · NO ACCOUNT — with [?] FULL ABOUT opposite. */
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin: 16px 0 12px;
+  text-transform: uppercase;
+  color: #777;
+}
+
+/* The full about copy lives behind [?] as a native details overlay: it
+   works without JS, and the keyboard layer only adds the ? toggle. */
+details.about {
+  position: relative;
+}
+
+details.about summary {
+  cursor: pointer;
+  color: #33ff66;
+  list-style: none;
+  white-space: nowrap;
+}
+
+details.about summary::-webkit-details-marker {
+  display: none;
+}
+
+details.about summary:hover,
+details.about summary:focus-visible {
+  background: #fff;
+  color: #000;
+}
+
+details.about .about-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 2;
+  width: min(72ch, calc(100vw - 48px));
+  background: #000;
+  border: 1px solid #444;
+  padding: 12px 14px;
+  text-transform: none;
+  color: #aaa;
+}
+
+details.about .about-body p + p {
   margin-top: 8px;
+}
+
+/* Filter and add-board share the row under the table. */
+.dir-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.dir-actions .filter {
+  margin: 0;
+}
+
+.add-board {
+  background: #33ff66;
+  color: #000;
+  text-decoration: none;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.add-board:hover,
+.add-board:focus-visible {
+  background: #fff;
+  color: #000;
 }
 
 /* -- state labels: color reinforces, text carries ----------------------- */

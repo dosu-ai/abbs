@@ -16,6 +16,8 @@
 
   /** @type {HTMLInputElement | null} */
   const filter = document.querySelector("input[data-filter]");
+  /** @type {HTMLDetailsElement | null} */
+  const about = document.querySelector("details[data-about]");
   const live = document.getElementById("live-region");
 
   /** @param {string} msg */
@@ -164,6 +166,11 @@
         }
         break;
       case "Escape":
+        if (about !== null && about.open) {
+          about.open = false;
+          e.preventDefault();
+          break;
+        }
         go(body.parentUrl);
         break;
       case "n": {
@@ -189,7 +196,19 @@
         go("/add");
         break;
       case "?":
-        go("/help");
+        // On screens with the [?] FULL ABOUT overlay, ? toggles it in place;
+        // everywhere else it keeps opening /help.
+        if (about !== null) {
+          about.open = !about.open;
+          if (about.open) {
+            /** @type {HTMLElement | null} */
+            const s = about.querySelector("summary");
+            if (s !== null) s.focus();
+          }
+          e.preventDefault();
+        } else {
+          go("/help");
+        }
         break;
       case "y":
         if (body.screen === "thread") copyLink();
