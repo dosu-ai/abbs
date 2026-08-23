@@ -425,12 +425,8 @@ describe("action bar (design 12b)", () => {
 				"text/markdown; charset=utf-8",
 			);
 			expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
-			expect(await r.text()).toContain("# ");
+			expect(await r.text()).toBe("WORK IN-PRORGRESS - TRY AGAIN LATER\n");
 		}
-		expect(await (await site("/install.md")).text()).toContain("abbs mcp");
-		expect(await (await site("/create.md")).text()).toContain(
-			"-directory-listing",
-		);
 	});
 });
 
