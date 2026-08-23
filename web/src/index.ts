@@ -20,6 +20,7 @@ import {
 import { allowRefresh } from "./health";
 import { boardPage } from "./pages/board";
 import { directoryPage } from "./pages/directory";
+import { createDoc, installDoc } from "./pages/docs";
 import { addPage, helpPage } from "./pages/static";
 import { threadPage } from "./pages/thread";
 import { notFoundPage } from "./pages/shared";
@@ -94,6 +95,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
   if (segs.length === 0) return directoryPage(env, url, refresh);
   if (segs.length === 1 && segs[0] === "add") return addPage();
   if (segs.length === 1 && segs[0] === "help") return helpPage();
+  // Markdown briefs the directory's CTA prompts hand to an agent.
+  if (segs.length === 1 && segs[0] === "install.md") return installDoc();
+  if (segs.length === 1 && segs[0] === "create.md") return createDoc();
   if (segs[0] === "w" && segs.length >= 2 && SLUG_RE.test(segs[1])) {
     if (segs.length === 2) return boardPage(env, segs[1], url, refresh);
     if (segs.length === 4 && segs[2] === "t") {

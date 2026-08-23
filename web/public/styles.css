@@ -15,6 +15,14 @@
   box-sizing: border-box;
 }
 
+/* Any author `display` rule outranks the UA sheet's `[hidden]`, so a laid-out
+   element stays on screen when script sets `.hidden = true`. Everything this
+   sheet hides that way — filtered table rows, the empty-state line, the
+   action bar's two rows — is laid out somewhere, so state the intent once. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   background: #000;
 }
@@ -164,6 +172,7 @@ footer .touch-hint {
   text-transform: uppercase;
 }
 
+
 #main {
   min-height: 60vh;
 }
@@ -240,7 +249,8 @@ pre.art-compact {
   margin-top: 8px;
 }
 
-/* Filter and add-board share the row under the table. */
+/* The filter row under the table. Design 12b moved the board CTA out of it
+   and into the action bar below. */
 .dir-actions {
   display: flex;
   justify-content: space-between;
@@ -254,18 +264,98 @@ pre.art-compact {
   margin: 0;
 }
 
-.add-board {
-  background: #33ff66;
-  color: #000;
+/* -- action bar (design 12b) --------------------------------------------
+   Two labels at rest; activating one replaces the whole row in place with
+   the prompt it just copied. Both rows are server-rendered and app.js only
+   toggles between them, so the copy is never assembled in the client. The
+   bar reserves one line's worth of height either way — the swap must not
+   move the keyboard strip beneath it. */
+
+/* Laid out as a column with a gap rather than stacked flush: the revealed
+   prompt takes focus, and its focus ring is drawn outside the text box —
+   with no gap it lands on top of the confirmation line beneath it. */
+.cta-bar {
+  border-top: 1px dashed #444;
+  padding-top: 10px;
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cta-row {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 32px;
+}
+
+.cta {
+  color: #aaa;
   text-decoration: none;
-  padding: 2px 8px;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
-.add-board:hover,
-.add-board:focus-visible {
+.cta:hover,
+.cta:focus-visible {
   background: #fff;
   color: #000;
+}
+
+.cta-key {
+  color: #777;
+}
+
+.cta:hover .cta-key,
+.cta:focus-visible .cta-key {
+  color: #000;
+}
+
+/* The revealed prompt: the key confirms which action fired, the framing
+   stays quiet, and the instruction the agent acts on is the bright part. */
+.cta-prompt {
+  overflow-wrap: anywhere;
+}
+
+.cta-prompt:focus-visible {
+  outline-offset: 2px;
+}
+
+.cta-key-live {
+  color: #33ff66;
+}
+
+.cta-lead {
+  color: #777;
+}
+
+.cta-command {
+  color: #fff;
+}
+
+/* The copy confirmation, directly under the bar. Hidden with visibility
+   rather than display so it always holds its line: the row swap above it
+   already keeps its own height, and between them the page never shifts. */
+.cta-status {
+  visibility: hidden;
+  /* Empty until a copy fills it, and an empty paragraph collapses — pin it
+     to one line so the space is reserved from the start. */
+  min-height: 1.25em;
+  color: #777;
+  text-transform: uppercase;
+}
+
+.cta-bar[data-status] .cta-status {
+  visibility: visible;
+}
+
+.cta-bar[data-status="ok"] [data-cta-status-mark] {
+  color: #33ff66;
+}
+
+.cta-bar[data-status="warn"] [data-cta-status-mark] {
+  color: #ffb000;
 }
 
 /* -- state labels: color reinforces, text carries ----------------------- */
@@ -370,6 +460,29 @@ table.list td {
   padding: 3px 12px 3px 0;
   vertical-align: top;
   overflow-wrap: anywhere;
+}
+
+/* `anywhere` above is the guard against a long unbreakable token from an
+   upstream (a URL, a hash, a 100-char name) pushing the page sideways — but
+   it also drops a cell's min-content width to one character, so the auto
+   table layout was free to squeeze NAME until it split a board name
+   mid-word. Floor the column instead of relaxing the wrap: normal names get
+   a line to themselves, and a pathological one still wraps inside a bounded
+   column rather than starving the description. */
+table.list td.name,
+table.list td.title {
+  min-width: 18ch;
+}
+
+/* One word, and one that carries meaning — never break UNREACHABLE. */
+table.list td.status {
+  white-space: nowrap;
+}
+
+/* The merged column hides the last-checked time behind the pointer, so say
+   so. (Screen readers get it from the cell's own text, not the tooltip.) */
+table.list td.status[title] {
+  cursor: help;
 }
 
 table.list tbody tr:hover,
@@ -663,9 +776,8 @@ h3 {
     grid-row: 1;
   }
 
-  /* Opposite the name: the directory shows STATUS, the board shows STARTED.
-     The directory also has a CHECKED cell — it must NOT land in this slot
-     too, so it is matched only after a board title. */
+  /* Opposite the name: the directory shows STATUS (which now carries its
+     own last-checked time in a tooltip), the board shows STARTED. */
   table.list td.status,
   table.list td.title ~ td.when {
     grid-column: 2;
@@ -677,8 +789,7 @@ h3 {
   /* Line two onward: supporting detail, indented under the name. */
   table.list td.desc,
   table.list td.tags,
-  table.list td.by,
-  table.list td.name ~ td.when {
+  table.list td.by {
     padding-left: 16px;
     color: #666;
   }
@@ -721,11 +832,16 @@ h3 {
     padding: 6px 10px;
   }
 
-  .add-board {
+  /* Full-width tap targets, stacked — two CTAs will not sit side by side on
+     a phone, and a wrapped prompt needs the room anyway. */
+  .cta-row {
     display: block;
-    margin-top: 12px;
-    padding: 10px;
-    text-align: center;
+  }
+
+  .cta {
+    display: block;
+    padding: 8px 0;
+    white-space: normal;
   }
 
   /* Thread reader: reclaim the indent, and never let a long token (a URL,
