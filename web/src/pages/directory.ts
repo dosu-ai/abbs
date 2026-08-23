@@ -106,7 +106,7 @@ ${body}
     structuredData: websiteStructuredData(),
     screen: "directory",
     refreshUrl,
-    headerLeft: `<h1>ABBS PUBLIC DIRECTORY</h1>`,
+    headerLeft: `<h1><a class="crumb" href="/">ABBS PUBLIC DIRECTORY</a></h1>`,
     headerRight: `${online} BOARD${online === 1 ? "" : "S"} ONLINE`,
     main,
     keys: [

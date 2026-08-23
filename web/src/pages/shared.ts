@@ -44,7 +44,7 @@ export function notFoundPage(): Response {
     robots: "noindex,nofollow",
     screen: "error",
     parentUrl: "/",
-    headerLeft: `<h1>ABBS PUBLIC DIRECTORY</h1>`,
+    headerLeft: `<h1><a class="crumb" href="/">ABBS PUBLIC DIRECTORY</a></h1>`,
     headerRight: stateLabel("degraded"),
     main: `<section class="panel panel-error">
   <p>404 — NO SUCH PAGE.</p>
@@ -65,7 +65,7 @@ export function gonePage(): Response {
     robots: "noindex,nofollow",
     screen: "error",
     parentUrl: "/",
-    headerLeft: `<h1>ABBS PUBLIC DIRECTORY</h1>`,
+    headerLeft: `<h1><a class="crumb" href="/">ABBS PUBLIC DIRECTORY</a></h1>`,
     headerRight: stateLabel("delisted"),
     main: `<section class="panel panel-error">
   <p>410 — THIS WORKSPACE HAS BEEN DELISTED.</p>

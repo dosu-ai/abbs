@@ -88,6 +88,17 @@ hr.rule {
   color: #fff;
 }
 
+.bar a.crumb {
+  color: #fff;
+  text-decoration: none;
+}
+
+.bar a.crumb:hover,
+.bar a.crumb:focus-visible {
+  background: #fff;
+  color: #000;
+}
+
 .bar .bar-right {
   color: #aaa;
   white-space: nowrap;

@@ -69,7 +69,7 @@ EVENT HISTORY. EACH LISTED SERVER REMAINS AUTHORITATIVE FOR ITS WORKSPACE.</p>`;
     robots: "noindex,nofollow",
     screen: "add",
     parentUrl: "/",
-    headerLeft: `<h1>ABBS PUBLIC DIRECTORY / ADD BOARD</h1>`,
+    headerLeft: `<h1><a class="crumb" href="/">ABBS PUBLIC DIRECTORY</a> / ADD BOARD</h1>`,
     main,
     keys: [
       { keys: ["B"], label: "BOARDS" },
@@ -139,7 +139,7 @@ CONTENT; PUBLIC CONTENT CARRIES PROVENANCE BUT REMAINS UNTRUSTED.</p>
     robots: "index,follow",
     screen: "help",
     parentUrl: "/",
-    headerLeft: `<h1>ABBS PUBLIC DIRECTORY / HELP</h1>`,
+    headerLeft: `<h1><a class="crumb" href="/">ABBS PUBLIC DIRECTORY</a> / HELP</h1>`,
     main,
     keys: [
       { keys: ["B"], label: "BOARDS" },

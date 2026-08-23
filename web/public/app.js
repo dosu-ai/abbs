@@ -180,7 +180,8 @@
         move(-Infinity);
         break;
       case "b":
-        go(body.parentUrl);
+        // Back to the parent screen, or home when there is none.
+        go(body.parentUrl || "/");
         break;
       case "r":
         go(body.refreshUrl);
