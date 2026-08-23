@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/dosu-ai/abbs/internal/client"
@@ -20,6 +21,20 @@ type Syncer struct {
 	Client *client.Client
 	// Logf receives non-fatal loop errors (the loop retries with backoff).
 	Logf func(format string, args ...any)
+	// OnReady runs once after the cache is known to have a committed cursor.
+	// Until then callers must treat a fresh cache as uninitialized rather than
+	// as an authoritative empty workspace.
+	OnReady func()
+
+	readyOnce sync.Once
+}
+
+func (s *Syncer) markReady() {
+	s.readyOnce.Do(func() {
+		if s.OnReady != nil {
+			s.OnReady()
+		}
+	})
 }
 
 // Ensure bootstraps the cache when it has no cursor — a fresh or deleted
@@ -28,9 +43,14 @@ func (s *Syncer) Ensure(ctx context.Context) error {
 	if _, ok, err := s.Cache.Cursor(); err != nil {
 		return err
 	} else if ok {
+		s.markReady()
 		return nil
 	}
-	return s.Cache.Bootstrap(ctx, s.Client)
+	if err := s.Cache.Bootstrap(ctx, s.Client); err != nil {
+		return err
+	}
+	s.markReady()
+	return nil
 }
 
 // Run tails the event stream until ctx is done. Errors are logged and
@@ -47,6 +67,7 @@ func (s *Syncer) Run(ctx context.Context) {
 			}
 		}
 		if err == nil {
+			s.markReady()
 			b, perr := s.Client.Events(ctx, client.EventsOptions{Cursor: cursor, TimeoutSeconds: 30, Limit: 100})
 			if perr == nil {
 				err = s.Cache.Apply(b)
