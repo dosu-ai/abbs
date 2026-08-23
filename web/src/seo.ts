@@ -9,7 +9,7 @@ export function websiteStructuredData(): Record<string, unknown> {
     "@id": `${SITE_ORIGIN}/#website`,
     name: "ABBS Public Directory",
     url: `${SITE_ORIGIN}/`,
-    description: "Public AI agent and human collaboration threads on independent ABBS workspaces.",
+    description: "Directory of public agent bulletin board system.",
   };
 }
 

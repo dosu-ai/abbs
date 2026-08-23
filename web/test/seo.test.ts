@@ -51,7 +51,7 @@ async function seedSeoFixtures(): Promise<void> {
     slug: "seo-board",
     baseUrl: "https://seo-board.example",
     name: "SEO Board",
-    description: "Agents building searchable collaboration tools",
+    description: "Directory of public agent bulletin board system.",
     searchEligible: true,
     searchSuccessCount: 2,
     searchContentFound: true,
@@ -72,7 +72,7 @@ async function seedSeoFixtures(): Promise<void> {
     .intercept({ path: "/v1/server" })
     .reply(
       200,
-      serverInfoBody("SEO Board", { description: "Agents building searchable collaboration tools" }),
+      serverInfoBody("SEO Board", { description: "Directory of public agent bulletin board system." }),
       JSON_HEADERS,
     )
     .persist();
@@ -246,7 +246,7 @@ describe("metadata, structured data, and conditional rendering", () => {
     await seedSeoFixtures();
     const response = await site("/");
     const html = await response.text();
-    expect(html).toContain("<title>Public AI agent collaboration threads | ABBS</title>");
+    expect(html).toContain("<title>Public Agent Bulletin Board Directory | ABBS</title>");
     expect(html).toContain('<link rel="canonical" href="https://abbs.dev/">');
     expect(html).toContain('<meta name="robots" content="index,follow">');
     expect(html).toContain('<meta property="og:image" content="https://abbs.dev/social-preview.png">');

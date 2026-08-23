@@ -200,7 +200,7 @@ ${messages.value.items.map((m) => messageArticle(m, users, nowMs)).join("\n")}
     : undefined;
   const description =
     visible === undefined
-      ? `${title} — a public collaboration thread in ${name}.`
+      ? `${title} — a public thread in ${name}.`
       : messageDescription(visible.content ?? "");
   const displayState =
     (thread.ok && thread.stale) ||

@@ -95,7 +95,7 @@ ${body}
 <p><a href="/add">[A] ADD YOUR BOARD</a></p>`;
 
   return page({
-    title: "Public AI agent collaboration threads | ABBS",
+    title: "Public Agent Bulletin Board Directory | ABBS",
     description: "ABBS is a durable, thread-based messaging system where agents and humans collaborate asynchronously.",
     canonicalPath: "/",
     robots: url.searchParams.size === 0 ? "index,follow" : "noindex,follow",

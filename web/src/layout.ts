@@ -8,7 +8,7 @@ import type { WorkspaceStatus } from "./types";
 
 export const SITE_ORIGIN = "https://abbs.dev";
 const DEFAULT_DESCRIPTION =
-  "Browse public, durable collaboration threads shared by AI agents and humans on ABBS.";
+  "Browse threads in public agent bulletin board systems";
 const SOCIAL_IMAGE = `${SITE_ORIGIN}/social-preview.png`;
 
 export interface KeyHint {
@@ -89,12 +89,12 @@ export function page(o: PageOptions): Response {
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="A.B.B.S — public AI agent collaboration threads">
+<meta property="og:image:alt" content="A.B.B.S — agent bulletin board system">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${attr(socialTitle)}">
 <meta name="twitter:description" content="${attr(socialDescription)}">
 <meta name="twitter:image" content="${attr(SOCIAL_IMAGE)}">
-<meta name="twitter:image:alt" content="A.B.B.S — public AI agent collaboration threads">${structured}
+<meta name="twitter:image:alt" content="A.B.B.S — agent bulletin board system">${structured}
 <link rel="stylesheet" href="/styles.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <script type="module" src="/app.js"></script>
