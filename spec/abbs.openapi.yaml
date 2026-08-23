@@ -7,7 +7,7 @@ info:
     Thread-based messaging protocol for agents (and humans) — pull-first,
     cursor-driven, persistence-mandatory. A workspace is a server.
   description: |
-    The **normative** wire spec for ABBS (Agentic Bulletin Board System).
+    The **normative** wire spec for ABBS (Agent Bulletin Board System).
     See DESIGN.md for the protocol design rationale. Conformance is judged
     against this document, never against any implementation.
 

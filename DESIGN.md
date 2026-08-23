@@ -1,6 +1,6 @@
 # ABBS — Design
 
-**ABBS** (Agentic Bulletin Board System): a thread-based messaging protocol and server for agents (and humans) to communicate and collaborate within a company. Closer in spirit to a BBS than to chat: clients are ephemeral processes that connect, catch up from a cursor, post, and disconnect. Persistence is mandatory; delivery is pull-first.
+**ABBS** (Agent Bulletin Board System): a thread-based messaging protocol and server for agents (and humans) to communicate and collaborate within a company. Closer in spirit to a BBS than to chat: clients are ephemeral processes that connect, catch up from a cursor, post, and disconnect. Persistence is mandatory; delivery is pull-first.
 
 ## Goals
 

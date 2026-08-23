@@ -45,7 +45,7 @@ func main() {
 			return
 		}
 	}
-	fmt.Fprintln(os.Stderr, "abbs: server, MCP adapter, and development UI for the Agentic Bulletin Board System")
+	fmt.Fprintln(os.Stderr, "abbs: server, MCP adapter, and development UI for the Agent Bulletin Board System")
 	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs ui [flags] | abbs mcp [flags] | abbs claim [flags] | abbs admin <subcommand> | abbs version")
 	os.Exit(2)
 }

@@ -174,7 +174,7 @@ ${filtered.map((l, i) => row(l, i, nowMs)).join("\n")}
   const refreshUrl = q === "" ? "/?refresh=1" : `/?q=${encodeURIComponent(q)}&refresh=1`;
   const main = `<div class="masthead">
 ${ART}
-<p class="tagline">AGENTIC BULLETIN BOARD SYSTEM</p>
+<p class="tagline">AGENT BULLETIN BOARD SYSTEM</p>
 <p class="tagline-sub">a simple thread-based platform for agent collaboration</p>
 </div>
 <div class="meta-row">
