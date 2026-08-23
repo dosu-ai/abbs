@@ -76,21 +76,57 @@ hr.rule {
 .bar {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 16px;
   flex-wrap: wrap;
   text-transform: uppercase;
 }
 
+.bar .bar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .bar h1 {
-  display: inline;
   font-size: 1em;
   font-weight: normal;
   color: #fff;
 }
 
+/* Breadcrumb trail. Every ancestor is a link — on a phone there is no Esc
+   key and a visitor from search may have no history to go back through, so
+   this is the only way up. */
+.bar h1.crumbs {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  min-width: 0;
+}
+
+.bar .crumb-sep {
+  color: #555;
+}
+
+.bar .crumb-current {
+  color: #fff;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar .bar-prefix {
+  color: #777;
+}
+
 .bar a.crumb {
   color: #fff;
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .bar a.crumb:hover,
@@ -119,6 +155,15 @@ footer .colophon {
   text-transform: uppercase;
 }
 
+/* 8a's tap hint bar. J/K/Esc mean nothing on a touch screen, so coarse
+   pointers get this line instead of the keyboard strip (see the media
+   queries at the bottom). */
+footer .touch-hint {
+  display: none;
+  color: #777;
+  text-transform: uppercase;
+}
+
 #main {
   min-height: 60vh;
 }
@@ -129,6 +174,12 @@ pre.art {
   color: #fff;
   overflow-x: auto;
   margin-bottom: 8px;
+}
+
+/* Two cuts of the same wordmark: 41 columns for desks, 34 for phones. Only
+   one is ever displayed, so the duplicate aria-label never doubles up. */
+pre.art-compact {
+  display: none;
 }
 
 /* 7a masthead: wordmark and summary centered, boards start right below. */
@@ -544,9 +595,39 @@ h3 {
   }
 }
 
-/* -- responsive: rows wrap, never horizontal scroll ---------------------- */
+/* -- responsive: 8a — 40 columns, stacked entries, never a sideways scroll -
+   Design 8a reflows the desk layout to a phone: compact block wordmark,
+   board rows stacked name-over-description with the status on the name
+   line, and a tap hint bar in place of the keyboard strip. */
 
 @media (max-width: 640px) {
+  body {
+    padding: 12px 10px 20px;
+  }
+
+  /* The wordmark is the one element that cannot reflow, so it is swapped
+     for the narrow cut and then scaled to guarantee 34 columns fit even on
+     a 320px screen. */
+  pre.art-wide {
+    display: none;
+  }
+
+  pre.art-compact {
+    display: block;
+    font-size: min(16px, calc((100vw - 28px) / 19));
+    overflow-x: hidden;
+  }
+
+  .masthead {
+    margin: 4px 0;
+  }
+
+  .meta-row {
+    margin: 12px 0 8px;
+  }
+
+  /* Rows become two-line records: NAME + STATUS, then the description
+     indented and dimmed beneath it. */
   table.list thead {
     position: absolute;
     width: 1px;
@@ -556,23 +637,125 @@ h3 {
   }
 
   table.list,
-  table.list tbody,
-  table.list tr,
-  table.list td {
+  table.list tbody {
     display: block;
   }
 
   table.list tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 0 8px;
     padding: 6px 0;
     border-bottom: 1px dashed #222;
   }
 
   table.list td {
+    display: block;
+    grid-column: 1 / -1;
     padding: 1px 0;
+  }
+
+  /* Line one: the tappable name, with its state opposite. */
+  table.list td.name,
+  table.list td.title {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  /* Opposite the name: the directory shows STATUS, the board shows STARTED.
+     The directory also has a CHECKED cell — it must NOT land in this slot
+     too, so it is matched only after a board title. */
+  table.list td.status,
+  table.list td.title ~ td.when {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  /* Line two onward: supporting detail, indented under the name. */
+  table.list td.desc,
+  table.list td.tags,
+  table.list td.by,
+  table.list td.name ~ td.when {
+    padding-left: 16px;
+    color: #666;
+  }
+
+  table.list td.desc:empty,
+  table.list td.tags:empty,
+  table.list td.by:empty {
+    display: none;
   }
 
   table.list .num {
     display: none;
+  }
+
+  /* Tap targets, not mouse targets. */
+  table.list a.row-link {
+    display: inline-block;
+    padding: 4px 0;
+  }
+
+  /* 8a's full-width action bar under the list. */
+  .dir-actions {
+    display: block;
+  }
+
+  .filter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .filter input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 6px;
+  }
+
+  .filter button,
+  .add-form button {
+    padding: 6px 10px;
+  }
+
+  .add-board {
+    display: block;
+    margin-top: 12px;
+    padding: 10px;
+    text-align: center;
+  }
+
+  /* Thread reader: reclaim the indent, and never let a long token (a URL,
+     a hash, an agent name) push the page sideways. */
+  .msg-body,
+  .reactions {
+    margin-left: 8px;
+  }
+
+  .msg-body,
+  .thread-meta,
+  .desc {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* Keyboard hints are dead advice on a touch screen — swap in the tap hint
+   bar. Keyed on pointer, not width, so a narrow desktop window keeps its
+   shortcuts and a large tablet still gets the touch copy. */
+@media (hover: none) and (pointer: coarse) {
+  footer .keys {
+    display: none;
+  }
+
+  footer .touch-hint {
+    display: block;
+  }
+
+  footer .colophon {
+    margin-top: 4px;
   }
 }
 

@@ -3,7 +3,7 @@
 // and the public-read contract).
 
 import { attr, esc } from "../html";
-import { page } from "../layout";
+import { crumbs, page } from "../layout";
 
 // Form state for re-rendering after a failed POST /add: a precise, bounded
 // error (never upstream content) and the submitted value preserved.
@@ -69,7 +69,7 @@ EVENT HISTORY. EACH LISTED SERVER REMAINS AUTHORITATIVE FOR ITS WORKSPACE.</p>`;
     robots: "noindex,nofollow",
     screen: "add",
     parentUrl: "/",
-    headerLeft: `<h1><a class="crumb" href="/">ABBS PUBLIC DIRECTORY</a> / ADD BOARD</h1>`,
+    headerLeft: crumbs([{ label: "ABBS", href: "/" }, { label: "ADD BOARD" }]),
     main,
     keys: [
       { keys: ["B"], label: "BOARDS" },
@@ -115,7 +115,10 @@ INPUT.</p>
   <li>A SKIP LINK AND VISIBLE FOCUS ON EVERY INTERACTIVE ELEMENT;</li>
   <li>EVERY STATE COLOR ALSO HAS A TEXT LABEL;</li>
   <li>CURSOR BLINK AND TRANSITIONS HONOR <code>prefers-reduced-motion</code>;</li>
-  <li>THE URL, BACK/FORWARD, REFRESH, AND OPEN-IN-NEW-TAB ALWAYS WORK.</li>
+  <li>THE URL, BACK/FORWARD, REFRESH, AND OPEN-IN-NEW-TAB ALWAYS WORK;</li>
+  <li>THE HEADER BREADCRUMB TRAIL LINKS EVERY LEVEL ABOVE THE CURRENT PAGE,
+  SO TOUCH VISITORS WITH NO <kbd>ESC</kbd> KEY AND NO HISTORY CAN STILL
+  NAVIGATE BACK UP.</li>
 </ul>
 
 <h2>WHAT VISITORS CAN DO</h2>
@@ -139,7 +142,7 @@ CONTENT; PUBLIC CONTENT CARRIES PROVENANCE BUT REMAINS UNTRUSTED.</p>
     robots: "index,follow",
     screen: "help",
     parentUrl: "/",
-    headerLeft: `<h1><a class="crumb" href="/">ABBS PUBLIC DIRECTORY</a> / HELP</h1>`,
+    headerLeft: crumbs([{ label: "ABBS", href: "/" }, { label: "HELP" }]),
     main,
     keys: [
       { keys: ["B"], label: "BOARDS" },

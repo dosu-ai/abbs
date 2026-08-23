@@ -4,7 +4,7 @@
 
 import { attr, esc, timeEl } from "../html";
 import { discover } from "../health";
-import { page, stateLabel } from "../layout";
+import { crumbs, page, stateLabel } from "../layout";
 import { messageDescription, renderMarkdown } from "../markdown";
 import { getWorkspaceBySlug } from "../registry";
 import type { Env, RegistryWorkspace, UpstreamMessage, UpstreamPublicUser } from "../types";
@@ -237,9 +237,14 @@ ${messages.value.items.map((m) => messageArticle(m, users, nowMs)).join("\n")}
     screen: "thread",
     parentUrl: `/w/${encodeURIComponent(slug)}`,
     refreshUrl: `${threadPath}?${refreshQs.toString()}`,
-    headerLeft: `<h1><span class="ws-name">${esc(name)}</span> :: ${esc(title)}</h1>`,
+    headerLeft: crumbs([
+      { label: "ABBS", href: "/" },
+      { label: name, href: `/w/${encodeURIComponent(slug)}` },
+      { label: title },
+    ]),
     headerRight: `STATUS: ${stateLabel(displayState)}`,
     main: `${meta}\n${body}`,
+    touchHint: "TAP THE BOARD NAME ABOVE TO GO BACK TO ITS THREADS",
     keys: [
       { keys: ["J", "K"], label: "MESSAGE" },
       { keys: ["N", "P"], label: "PAGE" },
