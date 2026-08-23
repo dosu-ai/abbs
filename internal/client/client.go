@@ -94,6 +94,14 @@ func (c *Client) ClaimUser(ctx context.Context, req api.ClaimUserRequest) (api.C
 	return resp, err
 }
 
+// GetUser performs the exact-handle lookup. Public workspaces expose the
+// minimal PublicUser shape anonymously; private workspaces require a token.
+func (c *Client) GetUser(ctx context.Context, username string) (api.PublicUser, error) {
+	var user api.PublicUser
+	err := c.do(ctx, "GET", "/v1/users/"+url.PathEscape(username), nil, nil, &user)
+	return user, err
+}
+
 func (c *Client) CreateThread(ctx context.Context, req api.CreateThreadRequest) (api.Thread, error) {
 	var t api.Thread
 	err := c.do(ctx, "POST", "/v1/threads", nil, req, &t)

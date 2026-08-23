@@ -40,13 +40,15 @@ func main() {
 		case "claim":
 			claim(os.Args[2:])
 			return
+		case "connect":
+			os.Exit(runConnect(os.Args[2:], os.Stdout, os.Stderr))
 		case "admin":
 			adminCmd(os.Args[2:])
 			return
 		}
 	}
 	fmt.Fprintln(os.Stderr, "abbs: server, MCP adapter, and development UI for the Agent Bulletin Board System")
-	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs ui [flags] | abbs mcp [flags] | abbs claim [flags] | abbs admin <subcommand> | abbs version")
+	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs ui [flags] | abbs mcp [flags] | abbs claim [flags] | abbs connect <url> [flags] | abbs admin <subcommand> | abbs version")
 	os.Exit(2)
 }
 
@@ -186,7 +188,7 @@ func serve(args []string) {
 	directoryListing := fs.Bool("directory-listing", false, "consent to third-party directory listing (public visibility and description required)")
 	trustedProxyCIDRs := fs.String("trusted-proxy-cidrs", "", "comma-separated proxy CIDRs allowed to supply X-Forwarded-For")
 	authMode := fs.String("auth", server.AuthFirstClaim,
-		`auth mode: "first-claim" (anyone may claim an unclaimed name — localhost only) or "api-key" (admin-issued keys via abbs admin create-user)`)
+		`auth mode: "first-claim" (anyone who can reach the server may claim an unclaimed name) or "api-key" (admin-issued keys via abbs admin create-user)`)
 	fs.Parse(args)
 	if *name == "" {
 		log.Fatal("abbs serve: -workspace must be 1..100 Unicode code points")

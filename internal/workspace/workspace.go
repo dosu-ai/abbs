@@ -5,12 +5,15 @@
 package workspace
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -19,6 +22,9 @@ import (
 // Profile is one [workspaces.<name>] entry.
 type Profile struct {
 	URL string `toml:"url"`
+	// Username is local metadata written by `abbs connect`. Older, hand-written
+	// profiles may omit it; the MCP adapter does not depend on it.
+	Username string `toml:"username"`
 	// Exactly one credential source: an inline token, a file holding it, or
 	// the name of an environment variable holding it.
 	Token     string `toml:"token"`
@@ -34,6 +40,8 @@ type file struct {
 	Workspaces map[string]Profile `toml:"workspaces"`
 }
 
+var profileNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
 // DefaultConfigPath is ~/.config/abbs/workspaces.toml (overridable via
 // ABBS_CONFIG or the -config flag).
 func DefaultConfigPath() string {
@@ -45,6 +53,156 @@ func DefaultConfigPath() string {
 		return "workspaces.toml"
 	}
 	return filepath.Join(home, ".config", "abbs", "workspaces.toml")
+}
+
+// TokenPath returns the default credential path for a connected profile.
+// Tokens deliberately live outside the profiles file so MCP configuration
+// and hand-written TOML never need to contain the secret itself.
+func TokenPath(name string) (string, error) {
+	if !profileNameRE.MatchString(name) {
+		return "", fmt.Errorf("invalid workspace profile %q: use lowercase letters, numbers, and hyphens", name)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("locate home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "abbs", name+".token"), nil
+}
+
+// Upsert atomically adds or replaces one [workspaces.<name>] block while
+// preserving every byte outside that block. This is intentionally not a
+// parse-and-re-emit operation: profiles files are user-authored and commonly
+// carry comments and formatting that a TOML encoder would discard.
+func Upsert(path, name string, p Profile) error {
+	return upsert(path, name, p, os.Rename)
+}
+
+func upsert(path, name string, p Profile, rename func(string, string) error) error {
+	if !profileNameRE.MatchString(name) {
+		return fmt.Errorf("invalid workspace profile %q: use lowercase letters, numbers, and hyphens", name)
+	}
+	if p.URL == "" {
+		return fmt.Errorf("workspace %q: url is required", name)
+	}
+
+	original, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read workspace config %s: %w", path, err)
+	}
+	updated := replaceBlock(original, name, profileBlock(name, p))
+	if err := atomicWrite(path, updated, 0o600, false, rename); err != nil {
+		return fmt.Errorf("write workspace config %s: %w", path, err)
+	}
+	return nil
+}
+
+// WriteToken atomically writes a bearer token with owner-only permissions.
+func WriteToken(path, token string) error {
+	if token == "" {
+		return fmt.Errorf("refusing to write an empty token")
+	}
+	if err := atomicWrite(path, []byte(token+"\n"), 0o600, true, os.Rename); err != nil {
+		return fmt.Errorf("write token %s: %w", path, err)
+	}
+	return nil
+}
+
+func atomicWrite(path string, contents []byte, mode os.FileMode, privateDir bool, rename func(string, string) error) (err error) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if privateDir {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		tmp.Close()
+		os.Remove(tmpPath)
+	}()
+	if err := tmp.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err := tmp.Write(contents); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return rename(tmpPath, path)
+}
+
+func profileBlock(name string, p Profile) []byte {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[workspaces.%s]\n", name)
+	fmt.Fprintf(&b, "url = %s\n", strconv.Quote(p.URL))
+	if p.Username != "" {
+		fmt.Fprintf(&b, "username = %s\n", strconv.Quote(p.Username))
+	}
+	if p.Token != "" {
+		fmt.Fprintf(&b, "token = %s\n", strconv.Quote(p.Token))
+	}
+	if p.TokenFile != "" {
+		fmt.Fprintf(&b, "token_file = %s\n", strconv.Quote(p.TokenFile))
+	}
+	if p.TokenEnv != "" {
+		fmt.Fprintf(&b, "token_env = %s\n", strconv.Quote(p.TokenEnv))
+	}
+	if p.ReadOnly {
+		b.WriteString("read_only = true\n")
+	}
+	return []byte(b.String())
+}
+
+func replaceBlock(original []byte, name string, block []byte) []byte {
+	header := "[workspaces." + name + "]"
+	start, end := -1, -1
+	for offset := 0; offset < len(original); {
+		next := bytes.IndexByte(original[offset:], '\n')
+		lineEnd := len(original)
+		if next >= 0 {
+			lineEnd = offset + next + 1
+		}
+		line := strings.TrimSpace(string(original[offset:lineEnd]))
+		if comment := strings.IndexByte(line, '#'); comment >= 0 {
+			line = strings.TrimSpace(line[:comment])
+		}
+		if start < 0 && line == header {
+			start = offset
+		} else if start >= 0 && strings.HasPrefix(line, "[") {
+			end = offset
+			break
+		}
+		offset = lineEnd
+	}
+	if start >= 0 {
+		if end < 0 {
+			end = len(original)
+		}
+		out := make([]byte, 0, start+len(block)+len(original)-end)
+		out = append(out, original[:start]...)
+		out = append(out, block...)
+		out = append(out, original[end:]...)
+		return out
+	}
+
+	out := append([]byte(nil), original...)
+	if len(out) > 0 && out[len(out)-1] != '\n' {
+		out = append(out, '\n')
+	}
+	if len(out) > 0 && (len(out) < 2 || out[len(out)-2] != '\n') {
+		out = append(out, '\n')
+	}
+	return append(out, block...)
 }
 
 // Load parses the profiles file. Names are returned sorted for stable
