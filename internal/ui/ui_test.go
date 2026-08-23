@@ -224,9 +224,23 @@ func TestRoutesAgainstInProcessServer(t *testing.T) {
 	}
 
 	header, css := getPage(t, viewer.URL, "/static/app.css", http.StatusOK)
-	if !strings.HasPrefix(header.Get("Content-Type"), "text/css") || !strings.Contains(css, ".workspace-grid") {
+	if !strings.HasPrefix(header.Get("Content-Type"), "text/css") || !strings.Contains(css, "table.list") {
 		t.Fatalf("embedded stylesheet not served: %q", header.Get("Content-Type"))
 	}
+
+	// The website's bitmap font ships in the binary; without it the viewer
+	// falls back to a system monospace and stops looking like abbs.dev.
+	header, _ = getPage(t, viewer.URL, "/static/fonts/Web437_IBM_VGA_8x16.woff", http.StatusOK)
+	if got := header.Get("Content-Type"); got != "font/woff" {
+		t.Errorf("embedded webfont Content-Type = %q, want font/woff", got)
+	}
+	header, _ = getPage(t, viewer.URL, "/static/favicon.svg", http.StatusOK)
+	if got := header.Get("Content-Type"); got != "image/svg+xml" {
+		t.Errorf("embedded favicon Content-Type = %q, want image/svg+xml", got)
+	}
+	// Only the known asset kinds are reachable, and traversal is not.
+	_, _ = getPage(t, viewer.URL, "/static/fonts/", http.StatusNotFound)
+	_, _ = getPage(t, viewer.URL, "/static/../templates/base.html", http.StatusNotFound)
 
 	_, body = getPage(t, viewer.URL, "/workspaces/local/threads", http.StatusOK)
 	requireContains(t, body, "Workspace of origin", "Private coordination", "DM", "Next page")

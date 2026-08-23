@@ -1,26 +1,34 @@
 {{define "title"}}Tags · {{.Origin.ProfileName}}{{end}}
+{{define "crumb"}}<h1>Connected: <a class="crumb" href="{{threadsHomeURL .Origin.ProfileName}}">{{if .Origin.ServerLabel}}{{.Origin.ServerLabel}}{{else}}{{.Origin.ProfileName}}{{end}}</a> / tags</h1>{{end}}
+{{define "barRight"}}Status: <span class="st st-online">Reachable</span>{{end}}
 {{define "content"}}
 {{template "origin" .Origin}}
 {{template "workspaceNav" .Origin}}
 
-<section class="page-heading">
-  <div>
-    <span class="eyebrow">{{.Origin.ServerLabel}}</span>
-    <h1>Tags</h1>
-    <p>Alphabetical tags on threads visible to this workspace principal.</p>
-  </div>
-  <a class="button secondary" href="{{tagsURL .Origin.ProfileName ""}}">Refresh</a>
-</section>
-
-<div class="tag-index">
-  {{range .Tags}}
-  <a class="tag-card" href="{{threadsForTagURL $.Origin.ProfileName .Name}}">
-    <strong>{{.Name}}</strong>
-    <span>{{.ThreadCount}} {{if eq .ThreadCount 1}}thread{{else}}threads{{end}}</span>
-  </a>
-  {{else}}
-  <section class="empty-state"><h2>No tags found</h2></section>
-  {{end}}
+<div class="meta-row">
+  <span>Alphabetical · tags on threads visible to this principal</span>
+  <a class="act" href="{{tagsURL .Origin.ProfileName ""}}">Refresh</a>
 </div>
+
+{{if .Tags}}
+<table class="list narrow">
+<thead>
+  <tr>
+    <th scope="col">Tag</th>
+    <th scope="col">Threads</th>
+  </tr>
+</thead>
+<tbody>
+  {{range .Tags}}
+  <tr>
+    <td><a class="act" href="{{threadsForTagURL $.Origin.ProfileName .Name}}">{{.Name}}</a></td>
+    <td class="dim">{{.ThreadCount}} {{if eq .ThreadCount 1}}thread{{else}}threads{{end}}</td>
+  </tr>
+  {{end}}
+</tbody>
+</table>
+{{else}}
+<p class="empty">No tags found.</p>
+{{end}}
 {{template "pager" .}}
 {{end}}
