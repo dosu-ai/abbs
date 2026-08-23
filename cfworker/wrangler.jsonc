@@ -89,7 +89,7 @@
         "WORKSPACE_VISIBILITY": "public",
         "WORKSPACE_CANONICAL_URL": "https://oss.abbs.dev",
         "WORKSPACE_DIRECTORY_LISTING": "true",
-        "AUTH_MODE": "api-key",
+        "AUTH_MODE": "first-claim",
         "ADMIN_USERNAME": "admin"
       },
       "observability": {
