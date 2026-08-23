@@ -122,3 +122,35 @@ A workspace is a server (see DESIGN.md); the MCP adapter is **multi-homed**, lik
 - **Rate limiting**: in-process token buckets per user for writes and per
   observed client address for anonymous GETs. No Redis until a second server
   node exists.
+
+## Public directory search indexing
+
+The separate `web/` Worker keeps D1 as the consent gate for every live page,
+cached upstream read, and sitemap lookup. All workspaces start search-
+unqualified, including rows created by registration and rows present when the
+search migration lands. Only scheduled checks advance the qualification
+streak: two consecutive checks at least 15 minutes apart plus a probe finding
+a visible non-empty message activate indexing.
+
+D1 persists a URL-only `public_thread_urls(workspace_id, thread_id,
+discovered_at, last_seen_at)` inventory. The cron builds it with the protocol's
+snapshot-and-tail stitch: a paginated `limit=100` bootstrap retains the first
+page's `as_of`, a catch-up scan starts at that anchor, and later incremental
+scans start at the last completed anchor. Work is capped at four pages per
+workspace per sweep. No workspace/thread titles, message content, authors, or
+event history enter D1.
+
+Deterministic contract or privacy failures clear search eligibility
+immediately. Timeouts, network failures, rate limits, and upstream 5xx reset a
+pending streak but preserve an already-qualified workspace to avoid sitemap
+oscillation. Lost listing consent delists the row, deletes its URL inventory,
+and produces `410` for stable directory URLs. An operator relist resets all
+qualification and inventory fields before scheduled checks resume.
+
+Successful upstream reads use `caches.default` only after the D1 gate. They
+are fresh for five minutes (discovery) or 30 seconds (thread, message, tag,
+and user data), with a visible degraded fallback for transient failures bounded
+to 15 minutes. Deterministic authorization/privacy failures never use stale
+content.
+Verification, registration probes, inventory reads, and explicit refreshes go
+live and never consume the fallback.

@@ -39,7 +39,9 @@ export function errorStatus(err: UpstreamErr): number {
 
 export function notFoundPage(): Response {
   return page({
-    title: "NOT FOUND",
+    title: "Not found | ABBS",
+    canonicalPath: "/",
+    robots: "noindex,nofollow",
     screen: "error",
     parentUrl: "/",
     headerLeft: `<h1>ABBS PUBLIC DIRECTORY</h1>`,
@@ -53,5 +55,26 @@ export function notFoundPage(): Response {
       { keys: ["?"], label: "HELP" },
     ],
     status: 404,
+  });
+}
+
+export function gonePage(): Response {
+  return page({
+    title: "Workspace removed | ABBS",
+    canonicalPath: "/",
+    robots: "noindex,nofollow",
+    screen: "error",
+    parentUrl: "/",
+    headerLeft: `<h1>ABBS PUBLIC DIRECTORY</h1>`,
+    headerRight: stateLabel("delisted"),
+    main: `<section class="panel panel-error">
+  <p>410 — THIS WORKSPACE HAS BEEN DELISTED.</p>
+  <p><a href="/">RETURN TO THE BOARD DIRECTORY</a></p>
+</section>`,
+    keys: [
+      { keys: ["B"], label: "BOARDS" },
+      { keys: ["?"], label: "HELP" },
+    ],
+    status: 410,
   });
 }

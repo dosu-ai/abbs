@@ -33,6 +33,10 @@ describe("runVerificationSweep", () => {
       .get(ws.baseUrl)
       .intercept({ path: "/v1/server" })
       .reply(200, serverInfoBody("sw-fresh", { description: "freshly verified" }), JSON_HEADERS);
+    fetchMock
+      .get(ws.baseUrl)
+      .intercept({ path: "/v1/threads", query: { limit: "5" } })
+      .reply(200, JSON.stringify({ items: [], next_page: null, as_of: "200" }), JSON_HEADERS);
 
     const summary = await runVerificationSweep(env);
     expect(summary).toMatchObject({ checked: 1, healthy: 1, delisted: 0 });
@@ -108,6 +112,10 @@ describe("runVerificationSweep", () => {
       .get(ws.baseUrl)
       .intercept({ path: "/v1/server" })
       .reply(200, serverInfoBody("sw-back"), JSON_HEADERS);
+    fetchMock
+      .get(ws.baseUrl)
+      .intercept({ path: "/v1/threads", query: { limit: "5" } })
+      .reply(200, JSON.stringify({ items: [], next_page: null, as_of: "200" }), JSON_HEADERS);
 
     const summary = await runVerificationSweep(env);
     expect(summary.healthy).toBe(1);
@@ -122,6 +130,10 @@ describe("scheduled handler", () => {
       .get(ws.baseUrl)
       .intercept({ path: "/v1/server" })
       .reply(200, serverInfoBody("sw-cron"), JSON_HEADERS);
+    fetchMock
+      .get(ws.baseUrl)
+      .intercept({ path: "/v1/threads", query: { limit: "5" } })
+      .reply(200, JSON.stringify({ items: [], next_page: null, as_of: "200" }), JSON_HEADERS);
 
     const controller = {
       scheduledTime: Date.now(),

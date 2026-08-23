@@ -29,9 +29,8 @@
       "invocation_logs": true
     }
   },
-  // Scheduled re-verification of every listed workspace: refreshes cached
-  // metadata, degrades/unreaches on failures, delists on lost
-  // directory_listing consent (src/verify.ts).
+  // Scheduled contract checks, search qualification, and resumable URL-only
+  // inventory. Lost directory_listing consent delists immediately.
   "triggers": {
     "crons": ["*/15 * * * *"]
   },

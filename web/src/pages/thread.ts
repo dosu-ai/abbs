@@ -5,23 +5,24 @@
 import { attr, esc, timeEl } from "../html";
 import { discover } from "../health";
 import { page, stateLabel } from "../layout";
-import { renderMarkdown } from "../markdown";
-import { getWorkspace } from "../registry";
-import type { Env, UpstreamMessage, UpstreamPublicUser } from "../types";
-import { fetchMessages, fetchThread, fetchUser, validatePageParams } from "../upstream";
-import { errorPanel, errorStatus, notFoundPage } from "./shared";
+import { messageDescription, renderMarkdown } from "../markdown";
+import { getWorkspaceBySlug } from "../registry";
+import type { Env, RegistryWorkspace, UpstreamMessage, UpstreamPublicUser } from "../types";
+import { fetchMessages, fetchPublicThread, fetchUser, validatePageParams } from "../upstream";
+import { errorPanel, errorStatus, gonePage, notFoundPage } from "./shared";
 import { problemResponse } from "../problems";
+import { breadcrumbStructuredData, discussionStructuredData } from "../seo";
 
 const MAX_AUTHOR_LOOKUPS = 25;
 const AUTHOR_CONCURRENCY = 6;
 
 // authorDirectory resolves public provenance ([HUMAN]/[AGENT], display name)
 // for the authors on this page. Soft-fails per author: a missing profile
-// just renders without a badge. Lookups are capped and cached (5m).
+// just renders without a badge. Lookups are capped and cached (30s).
 async function authorDirectory(
-  ws: NonNullable<Awaited<ReturnType<typeof getWorkspace>>>,
+  ws: RegistryWorkspace,
   messages: UpstreamMessage[],
-): Promise<Map<string, UpstreamPublicUser>> {
+): Promise<{ users: Map<string, UpstreamPublicUser>; stale: boolean }> {
   const names = new Set<string>();
   for (const m of messages) {
     names.add(m.author);
@@ -29,23 +30,30 @@ async function authorDirectory(
     if (names.size >= MAX_AUTHOR_LOOKUPS) break;
   }
   const out = new Map<string, UpstreamPublicUser>();
+  let stale = false;
   const queue = [...names];
   const workers = Array.from({ length: Math.min(AUTHOR_CONCURRENCY, queue.length) }, async () => {
     for (;;) {
       const name = queue.pop();
       if (name === undefined) return;
       const r = await fetchUser(ws, name);
-      if (r.ok) out.set(name, r.value);
+      if (r.ok) {
+        out.set(name, r.value);
+        if (r.stale) stale = true;
+      }
     }
   });
   await Promise.all(workers);
-  return out;
+  return { users: out, stale };
 }
 
 function authorSpan(username: string, users: Map<string, UpstreamPublicUser>): string {
   const u = users.get(username);
   const title = u?.display_name !== undefined ? ` title="${attr(u.display_name)}"` : "";
-  const badge = u !== undefined ? ` <span class="badge">[${u.kind === "agent" ? "AGENT" : "HUMAN"}]</span>` : "";
+  const badge =
+    u !== undefined
+      ? ` <span class="badge">[${u.kind === "agent" ? "AGENT" : "HUMAN"}]</span>`
+      : "";
   return `<span class="mention"${title}>@${esc(username)}</span>${badge}`;
 }
 
@@ -84,16 +92,20 @@ export async function threadPage(
   url: URL,
   refresh: boolean,
 ): Promise<Response> {
-  const ws = await getWorkspace(env.DB, slug);
+  const ws = await getWorkspaceBySlug(env.DB, slug);
   if (ws === null) return notFoundPage();
+  if (ws.status === "delisted") return gonePage();
 
   const params = validatePageParams({ page: url.searchParams.get("page"), limit: null });
   if (params === null) return problemResponse(400, "validation", "invalid page parameter");
 
-  const [d, thread, messages] = await Promise.all([
+  const [d, thread, messages, openingPage] = await Promise.all([
     discover(ws, refresh),
-    fetchThread(ws, threadId, refresh),
+    fetchPublicThread(ws, threadId, refresh),
     fetchMessages(ws, threadId, { ...params, limit: 50 }, refresh),
+    params.page === undefined
+      ? Promise.resolve(null)
+      : fetchMessages(ws, threadId, { limit: 1 }, refresh),
   ]);
 
   if (!thread.ok && thread.code === "not-found") return notFoundPage();
@@ -115,13 +127,29 @@ export async function threadPage(
 
   let body: string;
   let status = 200;
+  let users = new Map<string, UpstreamPublicUser>();
+  let authorsStale = false;
+  const opening =
+    params.page === undefined
+      ? messages.ok
+        ? messages.value.items[0]
+        : undefined
+      : openingPage?.ok
+        ? openingPage.value.items[0]
+        : undefined;
   if (!messages.ok) {
     body = errorPanel(messages);
     status = errorStatus(messages);
   } else if (messages.value.items.length === 0) {
     body = `<p class="empty">NO MESSAGES ON THIS PAGE.</p>`;
   } else {
-    const users = await authorDirectory(ws, messages.value.items);
+    const authorMessages =
+      opening !== undefined && !messages.value.items.some((message) => message.id === opening.id)
+        ? [opening, ...messages.value.items]
+        : messages.value.items;
+    const authors = await authorDirectory(ws, authorMessages);
+    users = authors.users;
+    authorsStale = authors.stale;
     body = `<div class="messages" data-list>
 ${messages.value.items.map((m) => messageArticle(m, users, nowMs)).join("\n")}
 </div>`;
@@ -140,7 +168,7 @@ ${messages.value.items.map((m) => messageArticle(m, users, nowMs)).join("\n")}
   // A thread that failed to load for a non-404 reason still renders the
   // reader frame with the error panel from the messages fetch.
   if (!thread.ok && messages.ok) {
-    body = errorPanel(thread) + body;
+    body = errorPanel(thread);
     status = errorStatus(thread);
   }
 
@@ -148,13 +176,69 @@ ${messages.value.items.map((m) => messageArticle(m, users, nowMs)).join("\n")}
   if (params.page !== undefined) refreshQs.set("page", params.page);
   refreshQs.set("refresh", "1");
 
+  const cleanPath = `/w/${encodeURIComponent(slug)}/t/${encodeURIComponent(threadId)}`;
+  const realPage = params.page === undefined || (messages.ok && messages.value.items.length > 0);
+  const canonicalPath =
+    params.page !== undefined && realPage
+      ? `${cleanPath}?page=${encodeURIComponent(params.page)}`
+      : cleanPath;
+  const unknownQuery = [...url.searchParams.keys()].some(
+    (key) => key !== "page" && key !== "refresh",
+  );
+  const indexable =
+    ws.searchEligible &&
+    thread.ok &&
+    messages.ok &&
+    status === 200 &&
+    realPage &&
+    !refresh &&
+    !unknownQuery;
+  const visible = messages.ok
+    ? messages.value.items.find(
+        (message) => !message.deleted && (message.content ?? "").trim() !== "",
+      )
+    : undefined;
+  const description =
+    visible === undefined
+      ? `${title} — a public thread in ${name}.`
+      : messageDescription(visible.content ?? "");
+  const displayState =
+    (thread.ok && thread.stale) ||
+    (messages.ok && messages.stale) ||
+    openingPage?.stale ||
+    authorsStale
+      ? "degraded"
+      : d.state;
+  const structured: Record<string, unknown>[] = [];
+  if (ws.searchEligible && status === 200 && thread.ok && messages.ok) {
+    structured.push(breadcrumbStructuredData(ws, thread.value));
+    const discussion = discussionStructuredData({
+      ws,
+      thread: thread.value,
+      opening,
+      visibleMessages: messages.value.items,
+      users,
+      canonicalPath,
+    });
+    if (discussion !== undefined) structured.push(discussion);
+  }
+
   return page({
-    title: `${name} :: ${title}`,
+    title: `${title} — ${name} | ABBS`,
+    description,
+    canonicalPath,
+    robots: indexable
+      ? "index,follow"
+      : status >= 400 || !ws.searchEligible
+        ? "noindex,nofollow"
+        : "noindex,follow",
+    openGraphType: "article",
+    structuredData: structured.length === 0 ? undefined : structured,
     screen: "thread",
     parentUrl: `/w/${encodeURIComponent(slug)}`,
     refreshUrl: `${threadPath}?${refreshQs.toString()}`,
     headerLeft: `<h1><span class="ws-name">${esc(name)}</span> :: ${esc(title)}</h1>`,
-    headerRight: `STATUS: ${stateLabel(d.state)}`,
+    headerRight: `STATUS: ${stateLabel(displayState)}`,
     main: `${meta}\n${body}`,
     keys: [
       { keys: ["J", "K"], label: "MESSAGE" },

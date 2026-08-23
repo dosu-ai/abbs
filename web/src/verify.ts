@@ -13,7 +13,13 @@
 // upstream.ts, so every probe inherits the same HTTPS rule, header
 // stripping, no-redirect policy, time/size caps, and bounded error codes.
 
-import { listForVerification, markDelisted, recordCheck } from "./registry";
+import {
+  listForVerification,
+  markDelisted,
+  recordScheduledFailure,
+  recordScheduledSuccess,
+} from "./registry";
+import { runWorkspaceInventory } from "./inventory";
 import { fetchDiscovery, fetchMessages, fetchThreads } from "./upstream";
 import type { UpstreamErrorCode } from "./upstream";
 import type { Env, RegistryWorkspace } from "./types";
@@ -38,6 +44,7 @@ export interface VerifiedMetadata {
   description: string;
   apiVersion: string;
   canonicalUrl: string;
+  contentFound: boolean;
 }
 
 export interface VerifyOk {
@@ -72,7 +79,8 @@ function fail(stage: VerifyStage, code: VerifyErrorCode): VerifyErr {
 
 // probeTarget wraps a normalized origin in registry-row shape so the read
 // proxy can be pointed at a not-yet-registered workspace during
-// registration. The synthetic id keeps its cache entries away from real rows.
+// registration. The synthetic id is used only for bounded diagnostics; probes
+// bypass persistent cache entirely.
 export function probeTarget(origin: string): RegistryWorkspace {
   return {
     id: `probe ${origin}`,
@@ -87,22 +95,32 @@ export function probeTarget(origin: string): RegistryWorkspace {
     lastCheckedAt: null,
     lastSuccessAt: null,
     lastErrorCode: null,
+    searchEligible: false,
+    searchSuccessCount: 0,
+    searchEligibleAt: null,
+    searchContentFound: false,
+    inventoryPhase: "bootstrap",
+    inventoryCursor: null,
+    inventoryAnchor: null,
+    inventoryCompletedAt: null,
   };
 }
 
 export interface VerifyOptions {
-  // Registration probes anonymous reads; the scheduled sweep repeats
-  // discovery only.
+  // Registration probes anonymous reads; scheduled checks do the same while
+  // crawler qualification is pending.
   probeReads: boolean;
+  // Qualification checks inspect up to five messages on each of the first
+  // five public threads and remember whether any visible content exists.
+  contentProbe?: boolean;
   // Registration requires the declared canonical origin to equal the
-  // submitted origin; the sweep passes null and caches whatever the
+  // submitted origin; the sweep passes null and persists whatever the
   // authoritative server now declares.
   requireCanonicalOrigin: string | null;
 }
 
-// verifyWorkspace always talks to the live upstream (refresh bypasses the
-// short discovery cache): a verification verdict must never come from a
-// stale cache entry.
+// verifyWorkspace always talks to the live upstream: a verification verdict
+// must never come from a persistent or stale cache entry.
 export async function verifyWorkspace(
   ws: RegistryWorkspace,
   opts: VerifyOptions,
@@ -133,6 +151,7 @@ export async function verifyWorkspace(
     return { ...fail("discovery", "canonical-mismatch"), declaredCanonical: declared };
   }
 
+  let contentFound = false;
   if (opts.probeReads) {
     const threads = await fetchThreads(ws, { limit: 5 }, true);
     if (!threads.ok) return fail("thread-list", threads.code);
@@ -141,10 +160,23 @@ export async function verifyWorkspace(
     for (const t of threads.value.items) {
       if (t.kind !== "public") return fail("thread-list", "private-thread-leak");
     }
-    const first = threads.value.items[0];
-    if (first !== undefined) {
-      const messages = await fetchMessages(ws, first.id, { limit: 1 }, true);
+    const toProbe = opts.contentProbe
+      ? threads.value.items.slice(0, 5)
+      : threads.value.items.slice(0, 1);
+    for (const thread of toProbe) {
+      const messages = await fetchMessages(
+        ws,
+        thread.id,
+        { limit: opts.contentProbe ? 5 : 1 },
+        true,
+      );
       if (!messages.ok) return fail("message-list", messages.code);
+      if (
+        opts.contentProbe &&
+        messages.value.items.some((m) => !m.deleted && (m.content ?? "").trim() !== "")
+      ) {
+        contentFound = true;
+      }
     }
   }
 
@@ -155,6 +187,7 @@ export async function verifyWorkspace(
       description: w.description ?? "",
       apiVersion: info.api_version,
       canonicalUrl: declared,
+      contentFound,
     },
   };
 }
@@ -177,44 +210,143 @@ export interface SweepSummary {
   degraded: number;
   unreachable: number;
   delisted: number;
+  qualified: number;
+  suspended: number;
+  inventoryPages: number;
+  inventoryUrls: number;
 }
 
-export async function runVerificationSweep(env: Env): Promise<SweepSummary> {
+function transientFailure(code: VerifyErrorCode): boolean {
+  return (
+    code === "timeout" ||
+    code === "network" ||
+    code === "rate-limited" ||
+    code === "http-5xx"
+  );
+}
+
+export async function runVerificationSweep(
+  env: Env,
+  at: Date = new Date(),
+): Promise<SweepSummary> {
   const rows = await listForVerification(env.DB);
-  const now = new Date().toISOString();
+  const now = at.toISOString();
   const summary: SweepSummary = {
     checked: rows.length,
     healthy: 0,
     degraded: 0,
     unreachable: 0,
     delisted: 0,
+    qualified: 0,
+    suspended: 0,
+    inventoryPages: 0,
+    inventoryUrls: 0,
   };
 
   for (let i = 0; i < rows.length; i += SWEEP_CONCURRENCY) {
     await Promise.all(
       rows.slice(i, i + SWEEP_CONCURRENCY).map(async (ws) => {
-        const r = await verifyWorkspace(ws, { probeReads: false, requireCanonicalOrigin: null });
+        const r = await verifyWorkspace(ws, {
+          probeReads: !ws.searchEligible,
+          contentProbe: !ws.searchEligible,
+          requireCanonicalOrigin: null,
+        });
         if (r.ok) {
-          await recordCheck(env.DB, ws.id, now, {
-            ok: true,
+          const qualification = await recordScheduledSuccess(env.DB, ws, now, {
             name: r.value.name,
             description: r.value.description,
             apiVersion: r.value.apiVersion,
             canonicalUrl: r.value.canonicalUrl,
+            contentFound: r.value.contentFound,
           });
           summary.healthy++;
+          if (qualification.becameEligible) {
+            summary.qualified++;
+            console.log(
+              "search qualification changed",
+              JSON.stringify({ workspace_id: ws.id, slug: ws.slug, eligible: true }),
+            );
+          }
+
+          if (qualification.searchEligible) {
+            const current: RegistryWorkspace = {
+              ...ws,
+              name: r.value.name,
+              description: r.value.description,
+              apiVersion: r.value.apiVersion,
+              canonicalUrl: r.value.canonicalUrl,
+              status: "active",
+              lastCheckedAt: now,
+              lastSuccessAt: now,
+              lastErrorCode: null,
+              searchEligible: true,
+              searchSuccessCount: qualification.searchSuccessCount,
+              searchContentFound: qualification.searchContentFound,
+              searchEligibleAt: qualification.becameEligible ? now : ws.searchEligibleAt,
+            };
+            const inventory = await runWorkspaceInventory(env.DB, current, now);
+            summary.inventoryPages += inventory.pages;
+            summary.inventoryUrls += inventory.urls;
+            console.log(
+              "search inventory progress",
+              JSON.stringify({
+                workspace_id: ws.id,
+                slug: ws.slug,
+                phase: inventory.phase,
+                pages: inventory.pages,
+                urls: inventory.urls,
+                completed: inventory.completed,
+                error_code: inventory.errorCode ?? null,
+              }),
+            );
+            if (inventory.errorCode !== undefined) {
+              const failure = await recordScheduledFailure(env.DB, current, now, {
+                errorCode: inventory.errorCode,
+                unreachable: inventory.errorCode === "timeout" || inventory.errorCode === "network",
+                transient: transientFailure(inventory.errorCode),
+              });
+              if (failure.becameSuspended) {
+                summary.suspended++;
+                console.warn(
+                  inventory.errorCode === "private-thread-leak"
+                    ? "search privacy failure"
+                    : "search indexing suspended",
+                  JSON.stringify({ workspace_id: ws.id, slug: ws.slug, code: inventory.errorCode }),
+                );
+              }
+            }
+          }
           return;
         }
         if (r.consentRevoked) {
           await markDelisted(env.DB, ws.id, now, "listing-revoked");
           summary.delisted++;
+          console.warn(
+            "workspace delisted",
+            JSON.stringify({ workspace_id: ws.id, slug: ws.slug, code: "listing-revoked" }),
+          );
           return;
         }
-        await recordCheck(env.DB, ws.id, now, {
-          ok: false,
+        const failure = await recordScheduledFailure(env.DB, ws, now, {
           errorCode: r.code,
           unreachable: r.unreachable,
+          transient: transientFailure(r.code),
         });
+        if (r.code === "private-thread-leak") {
+          console.warn(
+            "search privacy failure",
+            JSON.stringify({ workspace_id: ws.id, slug: ws.slug, code: r.code }),
+          );
+        }
+        if (failure.becameSuspended) {
+          summary.suspended++;
+          if (r.code !== "private-thread-leak") {
+            console.warn(
+              "search indexing suspended",
+              JSON.stringify({ workspace_id: ws.id, slug: ws.slug, code: r.code }),
+            );
+          }
+        }
         if (r.unreachable) summary.unreachable++;
         else summary.degraded++;
       }),

@@ -10,6 +10,8 @@ export type WorkspaceStatus =
   | "unreachable"
   | "delisted";
 
+export type InventoryPhase = "bootstrap" | "catchup" | "incremental";
+
 // A registry row. Name and description are cached presentation metadata,
 // refreshed from the authoritative server's /v1/server.
 export interface RegistryWorkspace {
@@ -25,6 +27,14 @@ export interface RegistryWorkspace {
   lastCheckedAt: string | null;
   lastSuccessAt: string | null;
   lastErrorCode: string | null;
+  searchEligible: boolean;
+  searchSuccessCount: number;
+  searchEligibleAt: string | null;
+  searchContentFound: boolean;
+  inventoryPhase: InventoryPhase;
+  inventoryCursor: string | null;
+  inventoryAnchor: string | null;
+  inventoryCompletedAt: string | null;
 }
 
 // Protocol shapes the website consumes — the anonymous public-read slice of

@@ -13,6 +13,9 @@ export async function seedWorkspace(
     name: string;
     description: string;
     status: WorkspaceStatus;
+    searchEligible: boolean;
+    searchSuccessCount: number;
+    searchContentFound: boolean;
   }> = {},
 ): Promise<RegistryWorkspace> {
   counter++;
@@ -30,12 +33,34 @@ export async function seedWorkspace(
     lastCheckedAt: null,
     lastSuccessAt: null,
     lastErrorCode: null,
+    searchEligible: over.searchEligible ?? false,
+    searchSuccessCount: over.searchSuccessCount ?? 0,
+    searchEligibleAt: over.searchEligible ? "2026-08-22T00:30:00Z" : null,
+    searchContentFound: over.searchContentFound ?? false,
+    inventoryPhase: "bootstrap",
+    inventoryCursor: null,
+    inventoryAnchor: null,
+    inventoryCompletedAt: null,
   };
   await env.DB.prepare(
-    `INSERT INTO workspaces (id, slug, base_url, name, description, status, submitted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO workspaces
+       (id, slug, base_url, name, description, status, submitted_at,
+        search_eligible, search_success_count, search_eligible_at, search_content_found)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(ws.id, ws.slug, ws.baseUrl, ws.name, ws.description, ws.status, ws.submittedAt)
+    .bind(
+      ws.id,
+      ws.slug,
+      ws.baseUrl,
+      ws.name,
+      ws.description,
+      ws.status,
+      ws.submittedAt,
+      ws.searchEligible ? 1 : 0,
+      ws.searchSuccessCount,
+      ws.searchEligibleAt,
+      ws.searchContentFound ? 1 : 0,
+    )
     .run();
   return ws;
 }
@@ -74,6 +99,6 @@ export function threadBody(over: Record<string, unknown> = {}): Record<string, u
   };
 }
 
-export function pageBody(items: unknown[], nextPage: string | null = null): string {
-  return JSON.stringify({ items, next_page: nextPage, as_of: "200" });
+export function pageBody(items: unknown[], nextPage: string | null = null, asOf = "200"): string {
+  return JSON.stringify({ items, next_page: nextPage, as_of: asOf });
 }
