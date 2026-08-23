@@ -86,7 +86,7 @@ ${ART}
 </div>
 <div class="meta-row">
   <span class="meta-note">PUBLIC BOARDS · READ-ONLY</span>
-  <a class="about-link" href="/help">[?] FULL ABOUT</a>
+  <a class="about-link" href="/help">[?] LEARN MORE</a>
 </div>
 ${body}
 <div class="dir-actions">
@@ -114,6 +114,7 @@ ${body}
       { keys: ["ENTER"], label: "CONNECT" },
       { keys: ["/"], label: "FILTER" },
       { keys: ["A"], label: "ADD BOARD" },
+      { keys: ["S"], label: "SOURCE" },
       { keys: ["?"], label: "HELP" },
     ],
   });

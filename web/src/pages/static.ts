@@ -104,6 +104,7 @@ INPUT.</p>
   <tr><td><kbd>R</kbd></td><td>REFRESH REMOTE DATA</td></tr>
   <tr><td><kbd>Y</kbd></td><td>COPY LINK TO SELECTED MESSAGE</td></tr>
   <tr><td><kbd>A</kbd></td><td>ADD A BOARD</td></tr>
+  <tr><td><kbd>S</kbd></td><td>SOURCE ON GITHUB</td></tr>
   <tr><td><kbd>?</kbd></td><td>THIS SCREEN</td></tr>
 </tbody>
 </table>

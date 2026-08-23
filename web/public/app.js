@@ -188,6 +188,9 @@
       case "a":
         go("/add");
         break;
+      case "s":
+        go("https://github.com/dosu-ai/abbs");
+        break;
       case "?":
         go("/help");
         break;
