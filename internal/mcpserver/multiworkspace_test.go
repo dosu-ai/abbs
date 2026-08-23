@@ -3,10 +3,15 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -15,6 +20,7 @@ import (
 	"github.com/dosu-ai/abbs/internal/client"
 	"github.com/dosu-ai/abbs/internal/server"
 	"github.com/dosu-ai/abbs/internal/store"
+	"github.com/dosu-ai/abbs/internal/workspace"
 )
 
 // Two real workspaces (two servers), one adapter: the M7 exit-criterion
@@ -62,7 +68,9 @@ func TestMultiWorkspace(t *testing.T) {
 		if err := sy.Ensure(ctx); err != nil {
 			t.Fatal(err)
 		}
-		return &Workspace{Name: name, Label: name, URL: url, Client: cl, Cache: ca, ReadOnly: readOnly}
+		w := &Workspace{Name: name, Label: name, URL: url, Client: cl, Cache: ca, ReadOnly: readOnly}
+		w.markReady()
+		return w
 	}
 	local := newWS("local", localTS.URL, localMe, false)
 	shared := newWS("shared", sharedTS.URL, sharedMe, true) // read-only posture
@@ -163,5 +171,248 @@ func TestMultiWorkspace(t *testing.T) {
 	}
 	if rt2.Thread.ID != created.Thread.ID {
 		t.Fatalf("fallback read = %+v", rt2)
+	}
+}
+
+func TestUnavailableWorkspaceRemainsVisibleAndSoleAvailableDefaults(t *testing.T) {
+	healthy := &Workspace{Name: "healthy", Label: "Healthy", URL: "http://healthy", Client: &client.Client{BaseURL: "http://healthy"}}
+	bad := &Workspace{Name: "bad", URL: "http://bad"}
+	bad.setUnavailable(errors.New("connection refused"))
+	a := &adapter{
+		workspaces: map[string]*Workspace{"bad": bad, "healthy": healthy},
+		names:      []string{"bad", "healthy"},
+	}
+
+	got, err := a.resolve("")
+	if err != nil || got != healthy {
+		t.Fatalf("resolve sole available workspace = %v, %v", got, err)
+	}
+	if _, err := a.resolve("bad"); err == nil || !strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "unknown workspace") {
+		t.Fatalf("resolve unavailable workspace error = %v", err)
+	}
+
+	_, out, err := a.listWorkspaces(context.Background(), nil, struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Workspaces) != 2 || out.Workspaces[0].Available || out.Workspaces[0].Error != "connection refused" || !out.Workspaces[1].Available {
+		t.Fatalf("list_workspaces = %+v", out.Workspaces)
+	}
+}
+
+func TestReadsUseHTTPUntilFreshCacheIsReady(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "abbs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(server.MustNew(st, server.Config{WorkspaceName: "truth"}))
+	t.Cleanup(func() { ts.Close(); st.Close() })
+
+	anon := &client.Client{BaseURL: ts.URL}
+	claim, err := anon.ClaimUser(ctx, api.ClaimUserRequest{Username: "me", Kind: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl := &client.Client{BaseURL: ts.URL, Token: claim.Token}
+	created, err := cl.CreateThread(ctx, api.CreateThreadRequest{Title: "server truth", Content: "not cached yet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := cache.Open(filepath.Join(t.TempDir(), "fresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ca.Close() })
+	if cached, err := ca.ListThreads(cache.ListThreadsOptions{}); err != nil || len(cached.Items) != 0 {
+		t.Fatalf("fresh cache = %+v, %v", cached, err)
+	}
+
+	w := &Workspace{Name: "truth", Label: "truth", URL: ts.URL, Client: cl, Cache: ca}
+	a := &adapter{workspaces: map[string]*Workspace{"truth": w}, names: []string{"truth"}}
+	_, threads, err := a.listThreads(ctx, nil, listThreadsIn{})
+	if err != nil || len(threads.Items) != 1 || threads.Items[0].ID != created.ID {
+		t.Fatalf("list_threads before cache ready = %+v, %v", threads, err)
+	}
+	_, thread, err := a.readThread(ctx, nil, readThreadIn{ThreadID: created.ID})
+	if err != nil || len(thread.Messages) != 1 || thread.Messages[0].Content != "not cached yet" {
+		t.Fatalf("read_thread before cache ready = %+v, %v", thread, err)
+	}
+}
+
+func TestCacheOpenFailureFallsBackToHTTP(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "abbs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(server.MustNew(st, server.Config{WorkspaceName: "direct"}))
+	t.Cleanup(func() { ts.Close(); st.Close() })
+	claim, err := (&client.Client{BaseURL: ts.URL}).ClaimUser(ctx, api.ClaimUserRequest{Username: "me", Kind: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl := &client.Client{BaseURL: ts.URL, Token: claim.Token}
+	if _, err := cl.CreateThread(ctx, api.CreateThreadRequest{Title: "direct read", Content: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs strings.Builder
+	w := &Workspace{Name: "direct", URL: ts.URL}
+	runtime := &workspaceRuntime{
+		w: w, profile: workspace.Profile{URL: ts.URL, Token: claim.Token},
+		logf:      func(_ string, format string, args ...any) { logs.WriteString(format) },
+		cachePath: func(_, _, _ string) (string, error) { return "broken.db", nil },
+		openCache: func(string) (*cache.Cache, error) { return nil, errors.New("permission denied") },
+	}
+	if err := runtime.connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if w.Cache != nil || w.unavailableError() != nil || !strings.Contains(logs.String(), "serving reads directly over HTTP") {
+		t.Fatalf("degraded cache state: cache=%v unavailable=%v logs=%q", w.Cache, w.unavailableError(), logs.String())
+	}
+	a := &adapter{workspaces: map[string]*Workspace{"direct": w}, names: []string{"direct"}}
+	_, out, err := a.listThreads(ctx, nil, listThreadsIn{})
+	if err != nil || len(out.Items) != 1 || out.Items[0].Title != "direct read" {
+		t.Fatalf("HTTP fallback = %+v, %v", out, err)
+	}
+}
+
+func TestBootstrapRunsAfterWorkspaceStartup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st, err := store.Open(filepath.Join(t.TempDir(), "abbs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := server.MustNew(st, server.Config{WorkspaceName: "async"})
+	bootstrapStarted := make(chan struct{})
+	releaseBootstrap := make(chan struct{})
+	var block atomic.Bool
+	var once sync.Once
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if block.Load() && r.Method == http.MethodGet && r.URL.Path == "/v1/threads" {
+			once.Do(func() { close(bootstrapStarted) })
+			select {
+			case <-releaseBootstrap:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		base.ServeHTTP(w, r)
+	}))
+	t.Cleanup(func() { ts.Close(); st.Close() })
+	claim, err := (&client.Client{BaseURL: ts.URL}).ClaimUser(ctx, api.ClaimUserRequest{Username: "me", Kind: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block.Store(true)
+
+	w := &Workspace{Name: "async", URL: ts.URL}
+	runtime := &workspaceRuntime{
+		w: w, profile: workspace.Profile{URL: ts.URL, Token: claim.Token},
+		cachePath: func(_, _, _ string) (string, error) { return filepath.Join(t.TempDir(), "cache.db"), nil },
+	}
+	if err := runtime.connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-bootstrapStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background bootstrap did not start")
+	}
+	if w.cacheForRead() != nil {
+		t.Fatal("cache became readable before bootstrap committed")
+	}
+	close(releaseBootstrap)
+	deadline := time.Now().Add(2 * time.Second)
+	for w.cacheForRead() == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if w.cacheForRead() == nil {
+		t.Fatal("cache did not become ready after bootstrap committed")
+	}
+}
+
+func TestUnavailableWorkspaceRecoversWithoutRestart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st, err := store.Open(filepath.Join(t.TempDir(), "abbs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := server.MustNew(st, server.Config{WorkspaceName: "recovered"})
+	var up atomic.Bool
+	up.Store(true)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !up.Load() {
+			http.Error(w, "temporarily down", http.StatusServiceUnavailable)
+			return
+		}
+		base.ServeHTTP(w, r)
+	}))
+	t.Cleanup(func() { ts.Close(); st.Close() })
+	claim, err := (&client.Client{BaseURL: ts.URL}).ClaimUser(ctx, api.ClaimUserRequest{Username: "me", Kind: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	up.Store(false)
+
+	healthyStore, err := store.Open(filepath.Join(t.TempDir(), "healthy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthyTS := httptest.NewServer(server.MustNew(healthyStore, server.Config{WorkspaceName: "healthy"}))
+	t.Cleanup(func() { healthyTS.Close(); healthyStore.Close() })
+	healthyClaim, err := (&client.Client{BaseURL: healthyTS.URL}).ClaimUser(ctx, api.ClaimUserRequest{Username: "me", Kind: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	profiles := map[string]workspace.Profile{
+		"flaky":   {URL: ts.URL, Token: claim.Token},
+		"healthy": {URL: healthyTS.URL, Token: healthyClaim.Token},
+	}
+	wss, err := initializeWorkspaces(ctx, profiles, []string{"flaky", "healthy"}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &adapter{workspaces: map[string]*Workspace{"flaky": wss[0], "healthy": wss[1]}, names: []string{"flaky", "healthy"}}
+	if got, err := a.resolve(""); err != nil || got.Name != "healthy" {
+		t.Fatalf("resolve while flaky is down = %v, %v", got, err)
+	}
+	if _, err := a.resolve("flaky"); err == nil || !strings.Contains(err.Error(), "HTTP 503") {
+		t.Fatalf("flaky error = %v", err)
+	}
+
+	up.Store(true)
+	deadline := time.Now().Add(3 * time.Second)
+	for wss[0].unavailableError() != nil && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := wss[0].unavailableError(); err != nil {
+		t.Fatalf("workspace did not recover: %v", err)
+	}
+	if _, err := a.resolve("flaky"); err != nil {
+		t.Fatalf("resolve recovered workspace: %v", err)
+	}
+	if _, err := a.resolve(""); err == nil || !strings.Contains(err.Error(), "several workspaces") {
+		t.Fatalf("empty workspace with both recovered = %v", err)
+	}
+}
+
+func TestNoAvailableWorkspaceListsEveryFailure(t *testing.T) {
+	one := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	two := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	oneURL, twoURL := one.URL, two.URL
+	one.Close()
+	two.Close()
+	profiles := map[string]workspace.Profile{
+		"one": {URL: oneURL, Token: "token"},
+		"two": {URL: twoURL, Token: "token"},
+	}
+	_, err := initializeWorkspaces(context.Background(), profiles, []string{"one", "two"}, true, nil)
+	if err == nil || !strings.Contains(err.Error(), "one: cannot reach server") || !strings.Contains(err.Error(), "two: cannot reach server") {
+		t.Fatalf("all-unavailable error = %v", err)
 	}
 }

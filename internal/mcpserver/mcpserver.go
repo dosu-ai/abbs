@@ -14,6 +14,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -34,6 +36,79 @@ type Workspace struct {
 	Client   *client.Client
 	Cache    *cache.Cache
 	ReadOnly bool
+
+	mu          sync.RWMutex
+	Unavailable error
+	ready       bool
+}
+
+// setUnavailable records why a configured workspace cannot currently be
+// used. The workspace remains registered so tools can report that error and a
+// background retry can make it available without restarting the adapter.
+func (w *Workspace) setUnavailable(err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.Unavailable = err
+}
+
+func (w *Workspace) setAvailable(label string, c *client.Client, ca *cache.Cache) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.Label = label
+	w.Client = c
+	w.Cache = ca
+	w.Unavailable = nil
+}
+
+func (w *Workspace) markReady() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ready = true
+}
+
+func (w *Workspace) unavailableError() error {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if w.Unavailable == nil {
+		return nil
+	}
+	return fmt.Errorf("workspace %q is unavailable: %w", w.Name, w.Unavailable)
+}
+
+func (w *Workspace) clientForRequest() (*client.Client, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if w.Unavailable != nil {
+		return nil, fmt.Errorf("workspace %q is unavailable: %w", w.Name, w.Unavailable)
+	}
+	if w.Client == nil {
+		return nil, fmt.Errorf("workspace %q is unavailable: connection is not initialized", w.Name)
+	}
+	return w.Client, nil
+}
+
+// cacheForRead returns a cache only after its first bootstrap (or a previous
+// run's cursor) has committed. Before that, an empty cache is not server truth.
+func (w *Workspace) cacheForRead() *cache.Cache {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if !w.ready {
+		return nil
+	}
+	return w.Cache
+}
+
+func (w *Workspace) info() workspaceInfo {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	info := workspaceInfo{
+		Name: w.Name, URL: w.URL, Label: w.Label, ReadOnly: w.ReadOnly,
+		Available: w.Unavailable == nil,
+	}
+	if w.Unavailable != nil {
+		info.Error = w.Unavailable.Error()
+	}
+	return info
 }
 
 type adapter struct {
@@ -60,7 +135,8 @@ func New(wss []*Workspace) *mcp.Server {
 		Name: "list_workspaces",
 		Description: "The configured workspaces (a workspace is a server; identity and credentials are " +
 			"per-workspace). Returns each workspace's name — the value for the workspace parameter on " +
-			"every other tool — plus its URL, server-reported label, and read_only posture.",
+			"every other tool — plus its URL, server-reported label, read_only posture, availability, " +
+			"and any current connection error.",
 	}, a.listWorkspaces)
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "inbox",
@@ -102,20 +178,40 @@ func New(wss []*Workspace) *mcp.Server {
 	return s
 }
 
-// resolve maps the workspace tool parameter to a connection. An empty name
-// is allowed only when exactly one workspace is configured — "posted to the
-// wrong community" should be a type error, not a silent failure.
+// resolve maps the workspace tool parameter to an available connection. With
+// several configured workspaces, an empty name is allowed only when exactly
+// one is currently available. "Posted to the wrong community" remains a type
+// error whenever there is a live choice to make.
 func (a *adapter) resolve(name string) (*Workspace, error) {
-	if name == "" {
-		if len(a.names) == 1 {
-			return a.workspaces[a.names[0]], nil
+	if name != "" {
+		w, ok := a.workspaces[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown workspace %q — configured: %s", name, strings.Join(a.names, ", "))
 		}
-		return nil, fmt.Errorf("several workspaces are configured — pass workspace: one of %s", strings.Join(a.names, ", "))
-	}
-	if w, ok := a.workspaces[name]; ok {
+		if err := w.unavailableError(); err != nil {
+			return nil, err
+		}
 		return w, nil
 	}
-	return nil, fmt.Errorf("unknown workspace %q — configured: %s", name, strings.Join(a.names, ", "))
+
+	var available []*Workspace
+	var unavailable []string
+	for _, configuredName := range a.names {
+		w := a.workspaces[configuredName]
+		if err := w.unavailableError(); err != nil {
+			unavailable = append(unavailable, err.Error())
+			continue
+		}
+		available = append(available, w)
+	}
+	switch len(available) {
+	case 1:
+		return available[0], nil
+	case 0:
+		return nil, fmt.Errorf("no workspaces are available: %s", strings.Join(unavailable, "; "))
+	default:
+		return nil, fmt.Errorf("several workspaces are configured — pass workspace: one of %s", strings.Join(a.names, ", "))
+	}
 }
 
 func (a *adapter) guardWrite(w *Workspace) error {
@@ -126,10 +222,12 @@ func (a *adapter) guardWrite(w *Workspace) error {
 }
 
 type workspaceInfo struct {
-	Name     string `json:"name"`
-	URL      string `json:"url"`
-	Label    string `json:"label"`
-	ReadOnly bool   `json:"read_only"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	Label     string `json:"label"`
+	ReadOnly  bool   `json:"read_only"`
+	Available bool   `json:"available"`
+	Error     string `json:"error,omitempty"`
 }
 
 type listWorkspacesOut struct {
@@ -139,8 +237,7 @@ type listWorkspacesOut struct {
 func (a *adapter) listWorkspaces(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, listWorkspacesOut, error) {
 	out := listWorkspacesOut{Workspaces: []workspaceInfo{}}
 	for _, name := range a.names {
-		w := a.workspaces[name]
-		out.Workspaces = append(out.Workspaces, workspaceInfo{Name: w.Name, URL: w.URL, Label: w.Label, ReadOnly: w.ReadOnly})
+		out.Workspaces = append(out.Workspaces, a.workspaces[name].info())
 	}
 	return nil, out, nil
 }
@@ -180,7 +277,15 @@ func (a *adapter) inbox(ctx context.Context, req *mcp.CallToolRequest, in inboxI
 	out := inboxOut{Items: []inboxEntry{}}
 	for _, name := range targets {
 		w := a.workspaces[name]
-		page, err := w.Client.Inbox(ctx, in.Page, in.Limit)
+		cl, err := w.clientForRequest()
+		if err != nil {
+			if len(targets) == 1 {
+				return nil, inboxOut{}, err
+			}
+			out.Errors = append(out.Errors, err.Error())
+			continue
+		}
+		page, err := cl.Inbox(ctx, in.Page, in.Limit)
 		if err != nil {
 			if len(targets) == 1 {
 				return nil, inboxOut{}, err
@@ -218,11 +323,15 @@ func (a *adapter) listThreads(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, listThreadsOut{}, err
 	}
+	cl, err := w.clientForRequest()
+	if err != nil {
+		return nil, listThreadsOut{}, err
+	}
 	var page api.ThreadPage
-	if w.Cache != nil {
-		page, err = w.Cache.ListThreads(cache.ListThreadsOptions{Since: in.Since, Tags: in.Tags, Page: in.Page, Limit: in.Limit})
+	if ca := w.cacheForRead(); ca != nil {
+		page, err = ca.ListThreads(cache.ListThreadsOptions{Since: in.Since, Tags: in.Tags, Page: in.Page, Limit: in.Limit})
 	} else {
-		page, err = w.Client.ListThreads(ctx, client.ListThreadsOptions{Since: in.Since, Tags: in.Tags, Page: in.Page, Limit: in.Limit})
+		page, err = cl.ListThreads(ctx, client.ListThreadsOptions{Since: in.Since, Tags: in.Tags, Page: in.Page, Limit: in.Limit})
 	}
 	if err != nil {
 		return nil, listThreadsOut{}, err
@@ -249,10 +358,14 @@ func (a *adapter) readThread(ctx context.Context, req *mcp.CallToolRequest, in r
 	if err != nil {
 		return nil, readThreadOut{}, err
 	}
-	if w.Cache != nil {
-		thread, err := w.Cache.GetThread(in.ThreadID)
+	cl, err := w.clientForRequest()
+	if err != nil {
+		return nil, readThreadOut{}, err
+	}
+	if ca := w.cacheForRead(); ca != nil {
+		thread, err := ca.GetThread(in.ThreadID)
 		if err == nil {
-			msgs, err := w.Cache.ListMessages(in.ThreadID, in.Page, in.Limit)
+			msgs, err := ca.ListMessages(in.ThreadID, in.Page, in.Limit)
 			if err != nil {
 				return nil, readThreadOut{}, err
 			}
@@ -264,11 +377,11 @@ func (a *adapter) readThread(ctx context.Context, req *mcp.CallToolRequest, in r
 		// Not cached yet (the tail may be seconds behind a brand-new
 		// thread): fall through to the server.
 	}
-	thread, err := w.Client.GetThread(ctx, in.ThreadID)
+	thread, err := cl.GetThread(ctx, in.ThreadID)
 	if err != nil {
 		return nil, readThreadOut{}, err
 	}
-	msgs, err := w.Client.ListMessages(ctx, in.ThreadID, in.Page, in.Limit)
+	msgs, err := cl.ListMessages(ctx, in.ThreadID, in.Page, in.Limit)
 	if err != nil {
 		return nil, readThreadOut{}, err
 	}
@@ -296,7 +409,11 @@ func (a *adapter) createThread(ctx context.Context, req *mcp.CallToolRequest, in
 	if err := a.guardWrite(w); err != nil {
 		return nil, threadOut{}, err
 	}
-	thread, err := w.Client.CreateThread(ctx, api.CreateThreadRequest{
+	cl, err := w.clientForRequest()
+	if err != nil {
+		return nil, threadOut{}, err
+	}
+	thread, err := cl.CreateThread(ctx, api.CreateThreadRequest{
 		Title: in.Title, Content: in.Content, Tags: in.Tags, Participants: in.Participants,
 	})
 	if err != nil {
@@ -324,7 +441,11 @@ func (a *adapter) reply(ctx context.Context, req *mcp.CallToolRequest, in replyI
 	if err := a.guardWrite(w); err != nil {
 		return nil, replyOut{}, err
 	}
-	msg, err := w.Client.PostMessage(ctx, in.ThreadID, in.Content)
+	cl, err := w.clientForRequest()
+	if err != nil {
+		return nil, replyOut{}, err
+	}
+	msg, err := cl.PostMessage(ctx, in.ThreadID, in.Content)
 	if err != nil {
 		return nil, replyOut{}, err
 	}
@@ -351,10 +472,147 @@ func (a *adapter) markRead(ctx context.Context, req *mcp.CallToolRequest, in mar
 	if err := a.guardWrite(w); err != nil {
 		return nil, markReadOut{}, err
 	}
-	if err := w.Client.SetReadCursor(ctx, in.ThreadID, in.Seq); err != nil {
+	cl, err := w.clientForRequest()
+	if err != nil {
+		return nil, markReadOut{}, err
+	}
+	if err := cl.SetReadCursor(ctx, in.ThreadID, in.Seq); err != nil {
 		return nil, markReadOut{}, err
 	}
 	return nil, markReadOut{Workspace: w.Name, ThreadID: in.ThreadID, Seq: in.Seq}, nil
+}
+
+type workspaceLogger func(name, format string, args ...any)
+
+type workspaceRuntime struct {
+	w       *Workspace
+	profile workspace.Profile
+	noCache bool
+	logf    workspaceLogger
+
+	cachePath func(name, url, token string) (string, error)
+	openCache func(path string) (*cache.Cache, error)
+}
+
+func (r *workspaceRuntime) log(format string, args ...any) {
+	if r.logf != nil {
+		r.logf(r.w.Name, format, args...)
+	}
+}
+
+// connect performs one attempt to make a configured workspace usable. Cache
+// setup is deliberately optional: discovery establishes availability, while a
+// cache path/open failure leaves reads on the HTTP path.
+func (r *workspaceRuntime) connect(ctx context.Context) error {
+	token, err := r.profile.ResolveToken()
+	if err != nil {
+		return fmt.Errorf("resolve credential: %w", err)
+	}
+	baseURL := strings.TrimRight(r.profile.URL, "/")
+	c := &client.Client{BaseURL: baseURL, Token: token}
+	info, err := c.ServerInfo(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot reach server at %s: %w", r.profile.URL, err)
+	}
+
+	var ca *cache.Cache
+	if !r.noCache {
+		cachePath := r.cachePath
+		if cachePath == nil {
+			cachePath = workspace.CachePath
+		}
+		openCache := r.openCache
+		if openCache == nil {
+			openCache = cache.Open
+		}
+		path, pathErr := cachePath(r.w.Name, baseURL, token)
+		if pathErr != nil {
+			r.log("cache path: %v; serving reads directly over HTTP", pathErr)
+		} else {
+			ca, err = openCache(path)
+			if err != nil {
+				r.log("open cache %s: %v; serving reads directly over HTTP", path, err)
+				ca = nil
+			}
+		}
+	}
+
+	r.w.setAvailable(info.Workspace.Name, c, ca)
+	if ca != nil {
+		sy := &cache.Syncer{
+			Cache: ca, Client: c, OnReady: r.w.markReady,
+			Logf: func(format string, args ...any) { r.log(format, args...) },
+		}
+		// Bootstrap and tail both happen here. Until bootstrap commits,
+		// Workspace.cacheForRead keeps tool reads on HTTP.
+		go sy.Run(ctx)
+	}
+	posture := ""
+	if r.profile.ReadOnly {
+		posture = " (read-only)"
+	}
+	r.log("connected to %q at %s%s", info.Workspace.Name, baseURL, posture)
+	return nil
+}
+
+// retry waits on the cache syncer's existing exponential schedule before
+// each new discovery attempt. A recovered workspace becomes available in
+// place, so the already-running MCP server and its tool surface do not change.
+func (r *workspaceRuntime) retry(ctx context.Context, previous error) {
+	backoff := time.Second
+	for ctx.Err() == nil {
+		r.log("unavailable: %v (retrying in %s)", previous, backoff)
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return
+		}
+
+		err := r.connect(ctx)
+		if err == nil {
+			return
+		}
+		r.w.setUnavailable(err)
+		previous = err
+		if backoff < 30*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+// initializeWorkspaces registers every configured profile, retaining failed
+// ones in the returned slice. It returns an error only when there is no usable
+// workspace, preserving single-workspace fail-fast while allowing a healthy
+// workspace to carry its unavailable peers.
+func initializeWorkspaces(ctx context.Context, profiles map[string]workspace.Profile, names []string, noCache bool, logf workspaceLogger) ([]*Workspace, error) {
+	wss := make([]*Workspace, 0, len(names))
+	var failed []*workspaceRuntime
+	var initialErrors []error
+	var failures []string
+	available := 0
+
+	for _, name := range names {
+		p := profiles[name]
+		w := &Workspace{Name: name, URL: strings.TrimRight(p.URL, "/"), ReadOnly: p.ReadOnly}
+		runtime := &workspaceRuntime{w: w, profile: p, noCache: noCache, logf: logf}
+		if err := runtime.connect(ctx); err != nil {
+			w.setUnavailable(err)
+			failed = append(failed, runtime)
+			initialErrors = append(initialErrors, err)
+			failures = append(failures, fmt.Sprintf("%s: %v", name, err))
+		} else {
+			available++
+		}
+		wss = append(wss, w)
+	}
+
+	if available == 0 {
+		return nil, fmt.Errorf("no available workspaces: %s", strings.Join(failures, "; "))
+	}
+	for i, runtime := range failed {
+		go runtime.retry(ctx, initialErrors[i])
+	}
+	return wss, nil
 }
 
 // Run is the `abbs mcp` entry point. With a workspace profiles file
@@ -389,49 +647,11 @@ func Run(args []string) error {
 		profiles["default"] = workspace.Profile{URL: *urlFlag, Token: *tokenFlag}
 	}
 
-	var wss []*Workspace
-	for _, name := range names {
-		p := profiles[name]
-		token, err := p.ResolveToken()
-		if err != nil {
-			return fmt.Errorf("workspace %q: %w", name, err)
-		}
-		baseURL := strings.TrimRight(p.URL, "/")
-		c := &client.Client{BaseURL: baseURL, Token: token}
-
-		// Fail fast and label the workspace via discovery.
-		info, err := c.ServerInfo(ctx)
-		if err != nil {
-			return fmt.Errorf("workspace %q: cannot reach server at %s: %w", name, p.URL, err)
-		}
-		w := &Workspace{Name: name, Label: info.Workspace.Name, URL: baseURL, Client: c, ReadOnly: p.ReadOnly}
-
-		if !*noCache {
-			path, err := workspace.CachePath(name, baseURL, token)
-			if err != nil {
-				return fmt.Errorf("workspace %q: cache path: %w", name, err)
-			}
-			ca, err := cache.Open(path)
-			if err != nil {
-				return fmt.Errorf("workspace %q: open cache %s: %w", name, path, err)
-			}
-			sy := &cache.Syncer{Cache: ca, Client: c, Logf: func(format string, args ...any) {
-				fmt.Fprintf(os.Stderr, "abbs mcp: workspace %q: "+format+"\n", append([]any{name}, args...)...)
-			}}
-			// Bootstrap synchronously so reads serve from a populated cache
-			// from the first tool call, then tail in the background.
-			if err := sy.Ensure(ctx); err != nil {
-				return fmt.Errorf("workspace %q: bootstrap cache: %w", name, err)
-			}
-			go sy.Run(ctx)
-			w.Cache = ca
-		}
-		posture := ""
-		if p.ReadOnly {
-			posture = " (read-only)"
-		}
-		fmt.Fprintf(os.Stderr, "abbs mcp: workspace %q → %q at %s%s\n", name, info.Workspace.Name, p.URL, posture)
-		wss = append(wss, w)
+	wss, err := initializeWorkspaces(ctx, profiles, names, *noCache, func(name, format string, args ...any) {
+		fmt.Fprintf(os.Stderr, "abbs mcp: workspace %q: "+format+"\n", append([]any{name}, args...)...)
+	})
+	if err != nil {
+		return err
 	}
 
 	return New(wss).Run(ctx, &mcp.StdioTransport{})
