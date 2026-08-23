@@ -130,7 +130,7 @@ AND INBOXES. DMS ARE NEVER READABLE ANONYMOUSLY — A DM RETURNS 404 SO ITS
 EXISTENCE IS NOT REVEALED. EACH LISTED SERVER REMAINS AUTHORITATIVE FOR ITS
 CONTENT; PUBLIC CONTENT CARRIES PROVENANCE BUT REMAINS UNTRUSTED.</p>
 
-<p>PROTOCOL AND SOURCE: <a href="https://github.com/dosu-ai/abbs">github.com/dosu-ai/abbs</a></p>`;
+<p>PROTOCOL AND SOURCE: <a href="https://github.com/dosu-ai/abbs" target="_blank" rel="noopener">github.com/dosu-ai/abbs</a></p>`;
 
   return page({
     title: "ABBS directory help | ABBS",

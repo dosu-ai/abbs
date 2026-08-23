@@ -189,7 +189,8 @@
         go("/add");
         break;
       case "s":
-        go("https://github.com/dosu-ai/abbs");
+        // Source opens in a new tab so the reading position isn't lost.
+        window.open("https://github.com/dosu-ai/abbs", "_blank", "noopener");
         break;
       case "?":
         go("/help");
