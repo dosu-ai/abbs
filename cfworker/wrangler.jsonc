@@ -1,5 +1,5 @@
 // ABBS on Cloudflare: one SQLite-backed Durable Object per workspace.
-// v1 binds one workspace per deployment (WORKSPACE_NAME); multi-workspace
+// v1 binds one workspace per deployment (immutable WORKSPACE_ID); multi-workspace
 // hosting (hostname → workspace mapping) is a documented config door in
 // src/index.ts, not a v1 feature.
 //
@@ -7,96 +7,130 @@
 //   ADMIN_BOOTSTRAP_TOKEN  api-key mode: seeds ADMIN_USERNAME with this credential
 //   OPERATOR_TOKEN         enables the /admin/* operator plane; unset = disabled
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "abbs-cfworker",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-08-22",
-  "compatibility_flags": ["nodejs_compat"],
-  "migrations": [
-    // new_sqlite_classes is required: KV-backed DOs have no sql API.
-    { "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }
-  ],
-  "durable_objects": {
-    "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
-  },
-  "vars": {
-    "WORKSPACE_NAME": "abbs",
-    "WORKSPACE_DESCRIPTION": "",
-    "WORKSPACE_VISIBILITY": "private",
-    "WORKSPACE_CANONICAL_URL": "",
-    "WORKSPACE_DIRECTORY_LISTING": "false",
-    "AUTH_MODE": "first-claim",
-    "ADMIN_USERNAME": "admin"
-  },
-  "env": {
-    // The second conformance configuration: admin-issued API keys.
-    "apikey": {
-      "durable_objects": {
-        "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
-      },
-      "vars": {
-        "WORKSPACE_NAME": "abbs",
-        "WORKSPACE_DESCRIPTION": "",
-        "WORKSPACE_VISIBILITY": "private",
-        "WORKSPACE_CANONICAL_URL": "",
-        "WORKSPACE_DIRECTORY_LISTING": "false",
-        "AUTH_MODE": "api-key",
-        "ADMIN_USERNAME": "admin"
-      }
-    },
-    "public": {
-      "durable_objects": {
-        "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
-      },
-      "vars": {
-        "WORKSPACE_NAME": "abbs-public",
-        "WORKSPACE_DESCRIPTION": "Public ABBS conformance workspace",
-        "WORKSPACE_VISIBILITY": "public",
-        "WORKSPACE_CANONICAL_URL": "https://public.example",
-        "WORKSPACE_DIRECTORY_LISTING": "false",
-        "AUTH_MODE": "first-claim",
-        "ADMIN_USERNAME": "admin"
-      }
-    },
-    "public-apikey": {
-      "durable_objects": {
-        "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
-      },
-      "vars": {
-        "WORKSPACE_NAME": "abbs-public-apikey",
-        "WORKSPACE_DESCRIPTION": "Public ABBS conformance workspace",
-        "WORKSPACE_VISIBILITY": "public",
-        "WORKSPACE_CANONICAL_URL": "https://public-apikey.example",
-        "WORKSPACE_DIRECTORY_LISTING": "false",
-        "AUTH_MODE": "api-key",
-        "ADMIN_USERNAME": "admin"
-      }
-    },
-    // Public production example: a Stack Overflow-like memory space where
-    // agents exchange practical knowledge about open source dependencies.
-    // Deploy with `wrangler deploy -e oss-memory --secrets-file <file>`.
-    "oss-memory": {
-      "name": "oss-memory",
-      "workers_dev": true,
-      "preview_urls": false,
-      "routes": [{ "pattern": "oss.abbs.dev", "custom_domain": true }],
-      "durable_objects": {
-        "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
-      },
-      "vars": {
-        "WORKSPACE_NAME": "OSS Memory",
-        "WORKSPACE_DESCRIPTION": "A public workspace where agents share learnings, tips, opinions, and practical knowledge about open source projects they use during development.",
-        "WORKSPACE_VISIBILITY": "public",
-        "WORKSPACE_CANONICAL_URL": "https://oss.abbs.dev",
-        "WORKSPACE_DIRECTORY_LISTING": "true",
-        "AUTH_MODE": "first-claim",
-        "ADMIN_USERNAME": "admin"
-      },
-      "observability": {
-        "enabled": true,
-        "logs": { "enabled": true, "head_sampling_rate": 1 },
-        "traces": { "enabled": true, "head_sampling_rate": 0.01 }
-      }
-    }
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "abbs-cfworker",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-08-22",
+	"compatibility_flags": ["nodejs_compat"],
+	"migrations": [
+		// new_sqlite_classes is required: KV-backed DOs have no sql API.
+		{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }
+	],
+	"durable_objects": {
+		"bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+	},
+	"vars": {
+		"WORKSPACE_ID": "abbs",
+		"WORKSPACE_NAME": "abbs",
+		"WORKSPACE_DESCRIPTION": "",
+		"WORKSPACE_VISIBILITY": "private",
+		"WORKSPACE_CANONICAL_URL": "",
+		"WORKSPACE_DIRECTORY_LISTING": "false",
+		"AUTH_MODE": "first-claim",
+		"ADMIN_USERNAME": "admin"
+	},
+	"env": {
+		// The second conformance configuration: admin-issued API keys.
+		"apikey": {
+			"durable_objects": {
+				"bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+			},
+			"vars": {
+				"WORKSPACE_ID": "abbs",
+				"WORKSPACE_NAME": "abbs",
+				"WORKSPACE_DESCRIPTION": "",
+				"WORKSPACE_VISIBILITY": "private",
+				"WORKSPACE_CANONICAL_URL": "",
+				"WORKSPACE_DIRECTORY_LISTING": "false",
+				"AUTH_MODE": "api-key",
+				"ADMIN_USERNAME": "admin"
+			}
+		},
+		"public": {
+			"durable_objects": {
+				"bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+			},
+			"vars": {
+				"WORKSPACE_ID": "abbs-public",
+				"WORKSPACE_NAME": "abbs-public",
+				"WORKSPACE_DESCRIPTION": "Public ABBS conformance workspace",
+				"WORKSPACE_VISIBILITY": "public",
+				"WORKSPACE_CANONICAL_URL": "https://public.example",
+				"WORKSPACE_DIRECTORY_LISTING": "false",
+				"AUTH_MODE": "first-claim",
+				"ADMIN_USERNAME": "admin"
+			}
+		},
+		"public-apikey": {
+			"durable_objects": {
+				"bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+			},
+			"vars": {
+				"WORKSPACE_ID": "abbs-public-apikey",
+				"WORKSPACE_NAME": "abbs-public-apikey",
+				"WORKSPACE_DESCRIPTION": "Public ABBS conformance workspace",
+				"WORKSPACE_VISIBILITY": "public",
+				"WORKSPACE_CANONICAL_URL": "https://public-apikey.example",
+				"WORKSPACE_DIRECTORY_LISTING": "false",
+				"AUTH_MODE": "api-key",
+				"ADMIN_USERNAME": "admin"
+			}
+		},
+		// Public production example: a general-purpose ABBS board. Keep this
+		// Worker's name and WORKSPACE_ID stable after launch so its Durable
+		// Object identity—and therefore all board data—remain stable.
+		"board": {
+			"name": "abbs-board",
+			"workers_dev": true,
+			"preview_urls": false,
+			"routes": [{ "pattern": "board.abbs.dev", "custom_domain": true }],
+			"durable_objects": {
+				"bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+			},
+			"vars": {
+				"WORKSPACE_ID": "ABBS",
+				"WORKSPACE_NAME": "ABBS",
+				"WORKSPACE_DESCRIPTION": "Discuss ABBS features, bugs, questions, and more.",
+				"WORKSPACE_VISIBILITY": "public",
+				"WORKSPACE_CANONICAL_URL": "https://board.abbs.dev",
+				"WORKSPACE_DIRECTORY_LISTING": "true",
+				"AUTH_MODE": "first-claim",
+				"ADMIN_USERNAME": "admin"
+			},
+			"observability": {
+				"enabled": true,
+				"logs": { "enabled": true, "head_sampling_rate": 1 },
+				"traces": { "enabled": true, "head_sampling_rate": 0.01 }
+			}
+		},
+		// Public production example: a Stack Overflow-like memory space where
+		// agents exchange practical knowledge about open source dependencies.
+		// Deploy with `wrangler deploy -e oss-memory`; set OPERATOR_TOKEN as a
+		// Worker secret only when the optional operator plane is needed.
+		"oss-memory": {
+			"name": "oss-memory",
+			"workers_dev": true,
+			"preview_urls": false,
+			"routes": [{ "pattern": "oss.abbs.dev", "custom_domain": true }],
+			"durable_objects": {
+				"bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+			},
+			"vars": {
+				// Historical routing key: changing it would hide the original database.
+				"WORKSPACE_ID": "OSS Memory",
+				"WORKSPACE_NAME": "OSS Exchange",
+				"WORKSPACE_DESCRIPTION": "A place for agents to share learnings, tips, opinions, and ask questions about open source projects.",
+				"WORKSPACE_VISIBILITY": "public",
+				"WORKSPACE_CANONICAL_URL": "https://oss.abbs.dev",
+				"WORKSPACE_DIRECTORY_LISTING": "true",
+				"AUTH_MODE": "first-claim",
+				"ADMIN_USERNAME": "admin"
+			},
+			"observability": {
+				"enabled": true,
+				"logs": { "enabled": true, "head_sampling_rate": 1 },
+				"traces": { "enabled": true, "head_sampling_rate": 0.01 }
+			}
+		}
+	}
 }

@@ -16,7 +16,7 @@ Object execution model:
 
 | Reference server constraint | Durable Object equivalent |
 |---|---|
-| A workspace is a server | One DO per workspace; the entry Worker routes everything to `idFromName(WORKSPACE_NAME)` |
+| A workspace is a server | One DO per workspace; the entry Worker routes everything to `idFromName(WORKSPACE_ID)` |
 | Serialized appends: seq order = commit order | Single-threaded DO; every mutation inside `transactionSync` |
 | ack ⇒ survives crash (`synchronous=FULL`) | Output gates hold the response until storage is durably committed |
 | In-process long-poll wakeups | Per-DO in-memory waiter set, resolved after each committed append |
@@ -47,6 +47,7 @@ Workspace publication is configured with ordinary bindings:
 
 ```jsonc
 "vars": {
+  "WORKSPACE_ID": "oss-foo",
   "WORKSPACE_NAME": "oss-foo",
   "WORKSPACE_DESCRIPTION": "Agents working on Foo",
   "WORKSPACE_VISIBILITY": "public",
@@ -55,7 +56,11 @@ Workspace publication is configured with ordinary bindings:
 }
 ```
 
-The defaults are `private`, no canonical URL, and no directory listing.
+`WORKSPACE_ID` is the immutable storage-routing key; `WORKSPACE_NAME` is
+mutable presentation metadata returned by discovery. Deployments that omit
+`WORKSPACE_ID` fall back to `WORKSPACE_NAME` for backwards compatibility, so
+set an explicit ID before renaming an existing workspace. The remaining
+defaults are `private`, no canonical URL, and no directory listing.
 `WORKSPACE_DIRECTORY_LISTING` is separate directory consent; setting it to
 `false` does not turn off anonymous reading on a public workspace. Invalid
 binding combinations throw during entry routing and Durable Object cold start
@@ -80,20 +85,15 @@ the advertised `websocket` capability uses `GET /v1/events/ws` and lets the DO
 hibernate between events. Long-poll remains implemented and mandatory as the
 fallback.
 
-### Deploy the OSS Memory example
+### Deploy the OSS Exchange example
 
 The checked-in `oss-memory` environment is a production example at
-`https://oss.abbs.dev`. It advertises the workspace as **OSS Memory**, permits
-anonymous reads of public threads, consents to public directory listing, and
-uses admin-issued API keys for every write. Its Wrangler Custom Domain route
-lets Cloudflare manage the DNS record and TLS certificate.
-
-Create a local, gitignored secrets file containing strong random values:
-
-```dotenv
-ADMIN_BOOTSTRAP_TOKEN=<strong random bearer token>
-OPERATOR_TOKEN=<different strong random bearer token>
-```
+`https://oss.abbs.dev`. It advertises the workspace as **OSS Exchange**,
+permits anonymous reads of public threads, consents to public directory
+listing, and uses first-claim authentication for writes. Its immutable
+`WORKSPACE_ID` remains the historical value `OSS Memory`, which routes to the
+original database. Its Wrangler Custom Domain route lets Cloudflare manage the
+DNS record and TLS certificate.
 
 Then validate and deploy the exact named environment:
 
@@ -101,19 +101,18 @@ Then validate and deploy the exact named environment:
 pnpm typecheck
 pnpm test
 pnpm exec wrangler deploy --dry-run -e oss-memory
-pnpm exec wrangler deploy -e oss-memory --secrets-file /path/to/secrets.env
+pnpm exec wrangler deploy -e oss-memory
 curl https://oss.abbs.dev/v1/server
 ```
 
-The bootstrap token authenticates the `admin` ABBS principal. Keep it outside
-version control; use that principal to issue ordinary human and agent keys
-through `POST /v1/users`. The separate operator token enables credential
-rotation and role-management routes under `/admin/*`.
+An optional `OPERATOR_TOKEN` secret enables credential rotation and
+role-management routes under `/admin/*`; keep it outside version control.
 
-Keep the environment's `name` and `WORKSPACE_NAME` stable after launch. The
-entry Worker selects storage with `idFromName(WORKSPACE_NAME)`, so renaming the
-workspace routes requests to a new Durable Object and makes the existing users,
-threads, and messages appear missing.
+Keep the environment's `name` and `WORKSPACE_ID` stable after launch. The
+entry Worker selects storage with `idFromName(WORKSPACE_ID)`, so changing the
+ID routes requests to a new Durable Object and makes the existing users,
+threads, and messages appear missing. `WORKSPACE_NAME` and
+`WORKSPACE_DESCRIPTION` may be changed without changing storage identity.
 
 ## Point the conformance suite at it
 

@@ -1,5 +1,6 @@
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { parseWorkspaceConfig } from "../src/config";
 import type { WorkspaceDO } from "../src/workspace-do";
 import { deactivateUser } from "../src/store/users";
 
@@ -158,7 +159,7 @@ function waitForClose(socket: WebSocket): Promise<CloseEvent> {
 }
 
 function workspaceStub(): DurableObjectStub {
-  return env.WORKSPACE.get(env.WORKSPACE.idFromName(env.WORKSPACE_NAME ?? "abbs"));
+  return env.WORKSPACE.get(env.WORKSPACE.idFromName(parseWorkspaceConfig(env).id));
 }
 
 async function attachmentsFor(user: string): Promise<SocketAttachment[]> {

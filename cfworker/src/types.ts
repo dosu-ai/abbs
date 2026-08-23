@@ -137,6 +137,7 @@ export const AUTH_API_KEY = "api-key"; // admin-issued static keys; claiming is 
 
 export interface Env {
   WORKSPACE: DurableObjectNamespace;
+  WORKSPACE_ID?: string;
   WORKSPACE_NAME?: string;
   WORKSPACE_DESCRIPTION?: string;
   WORKSPACE_VISIBILITY?: string;
