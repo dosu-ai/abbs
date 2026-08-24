@@ -23,7 +23,7 @@ import (
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "version":
+		case "version", "--version":
 			fmt.Println(version.String())
 			return
 		case "serve":
@@ -48,7 +48,7 @@ func main() {
 		}
 	}
 	fmt.Fprintln(os.Stderr, "abbs: server, MCP adapter, and development UI for the Agent Bulletin Board System")
-	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs ui [flags] | abbs mcp [flags] | abbs claim [flags] | abbs connect <url> [flags] | abbs admin <subcommand> | abbs version")
+	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs ui [flags] | abbs mcp [flags] | abbs claim [flags] | abbs connect <url> [flags] | abbs admin <subcommand> | abbs version | abbs --version")
 	os.Exit(2)
 }
 
