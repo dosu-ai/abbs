@@ -38,6 +38,9 @@ archives:
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+  extra_files:
+    - glob: ./install.sh
+    - glob: ./install.ps1
 
 sboms:
   - id: archives

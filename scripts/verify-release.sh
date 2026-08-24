@@ -7,6 +7,7 @@ if [[ $# -lt 1 || $# -gt 2 ]]; then
 fi
 
 dist_dir="$(cd "$1" && pwd)"
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 require_signature="${2:-}"
 shopt -s nullglob
 
@@ -32,11 +33,30 @@ done
 (
   cd "$dist_dir"
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum --check checksums.txt
+    awk '$2 != "install.sh" && $2 != "install.ps1"' checksums.txt | sha256sum --check -
   else
-    shasum -a 256 --check checksums.txt
+    awk '$2 != "install.sh" && $2 != "install.ps1"' checksums.txt | shasum -a 256 --check -
   fi
 )
+
+for installer in install.sh install.ps1; do
+  expected_hash=$(awk -v name="$installer" '$2 == name { print $1 }' "$dist_dir/checksums.txt")
+  expected_count=$(awk -v name="$installer" '$2 == name { count++ } END { print count + 0 }' "$dist_dir/checksums.txt")
+  if [[ "$expected_count" -ne 1 || ! "$expected_hash" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "expected exactly one SHA-256 checksum for $installer" >&2
+    exit 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual_hash=$(sha256sum "$repo_dir/$installer")
+  else
+    actual_hash=$(shasum -a 256 "$repo_dir/$installer")
+  fi
+  actual_hash=${actual_hash%%[[:space:]]*}
+  if [[ "$actual_hash" != "$expected_hash" ]]; then
+    echo "$installer does not match checksums.txt" >&2
+    exit 1
+  fi
+done
 
 for archive in "${archives[@]}"; do
   if [[ "$archive" == *.zip ]]; then
@@ -65,4 +85,4 @@ if [[ "$require_signature" == "--signed" && ! -s "$dist_dir/checksums.txt.sigsto
   exit 1
 fi
 
-echo "verified six archives, checksums, archive contents, and per-archive SBOMs"
+echo "verified six archives, checksums, installers, archive contents, and per-archive SBOMs"
