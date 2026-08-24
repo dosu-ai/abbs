@@ -99,7 +99,7 @@ Optional transport per DESIGN.md: the WS stream is a long-poll that doesn't hang
 
 - Release pipeline (goreleaser); versioning policy written down.
 
-**Exit:** `v1.0` tag; a third party can implement the protocol from `/spec` + `/conformance` alone, never reading our server code.
+**Exit:** `v1.0` tag; a third party can implement the protocol from `/spec` + `/conformance` alone, never reading our server code. (Release automation done: Release Please manages Conventional Commit-driven SemVer, release PRs, tags, changelog, and draft notes; GoReleaser builds the six CGO-free archives with checksums, per-archive SBOMs, keyless signing, and pinned tooling; native artifact/installer gates and GitHub provenance run before publication; the published event dispatches the Homebrew tap update. The first actual `v1.0.0` tag and repository protection/App/immutable-release settings are rollout operations.)
 
 ## M12 — Optional WebSocket event transport
 

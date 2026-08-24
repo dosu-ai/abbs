@@ -9,8 +9,8 @@ jobs:
   go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: gofmt
@@ -29,8 +29,8 @@ jobs:
         auth: [first-claim, api-key]
         visibility: [private, public]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: black-box conformance suite (${{ matrix.auth }}, ${{ matrix.visibility }})
@@ -41,7 +41,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: container image builds and serves
         run: |
           docker build -t abbs .
@@ -56,14 +56,14 @@ jobs:
       run:
         working-directory: cfworker
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - run: pnpm install --frozen-lockfile
@@ -103,7 +103,7 @@ jobs:
       - name: conformance suite, public api-key configuration
         working-directory: conformance
         run: ABBS_BASE_URL=http://127.0.0.1:8790 ABBS_VISIBILITY=public ABBS_ADMIN_TOKEN="$ABBS_ADMIN_TOKEN" go test -count=1 -shuffle=on ./...
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: schemathesis against the cfworker server
         working-directory: .
         run: |
@@ -133,9 +133,9 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -177,11 +177,11 @@ jobs:
   fuzz:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: schemathesis against a live server
         run: |
           go build -o /tmp/abbs ./cmd/abbs
@@ -198,14 +198,14 @@ jobs:
   spec:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
       - name: redocly lint
         run: pnpm --package=@redocly/cli@2 dlx redocly lint spec/abbs.openapi.yaml
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: schemathesis parses the spec
         # Full schemathesis fuzzing runs against a live server from M2 on;
         # here we assert the document loads and every operation is generatable.

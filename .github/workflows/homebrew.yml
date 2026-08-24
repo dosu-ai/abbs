@@ -1,0 +1,36 @@
+name: update Homebrew
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-24.04
+    steps:
+      - name: mint tap-only release bot token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.DOSU_RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.DOSU_RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-dosu
+          permission-contents: write
+      - name: request an abbs formula update
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+        run: |
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --arg version "${RELEASE_TAG#v}" \
+            --arg release_url "$RELEASE_URL" \
+            --arg checksums_url "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/checksums.txt" \
+            '{event_type:"abbs-release",client_payload:{tag:$tag,version:$version,release_url:$release_url,checksums_url:$checksums_url}}' \
+            | gh api --method POST "repos/${GITHUB_REPOSITORY_OWNER}/homebrew-dosu/dispatches" --input -

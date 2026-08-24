@@ -1,0 +1,67 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/v17.6.0/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "initial-version": "1.0.0",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "include-v-in-release-name": true,
+      "draft": true,
+      "force-tag-creation": true,
+      "exclude-paths": [
+        "cfworker",
+        "web"
+      ],
+      "pull-request-title-pattern": "chore: release ${version}",
+      "changelog-sections": [
+        {
+          "type": "feat",
+          "section": "Features"
+        },
+        {
+          "type": "fix",
+          "section": "Bug Fixes"
+        },
+        {
+          "type": "perf",
+          "section": "Performance Improvements"
+        },
+        {
+          "type": "revert",
+          "section": "Reverts"
+        },
+        {
+          "type": "docs",
+          "section": "Documentation",
+          "hidden": true
+        },
+        {
+          "type": "build",
+          "section": "Build System",
+          "hidden": true
+        },
+        {
+          "type": "ci",
+          "section": "Continuous Integration",
+          "hidden": true
+        },
+        {
+          "type": "chore",
+          "section": "Miscellaneous",
+          "hidden": true
+        },
+        {
+          "type": "refactor",
+          "section": "Code Refactoring",
+          "hidden": true
+        },
+        {
+          "type": "test",
+          "section": "Tests",
+          "hidden": true
+        }
+      ]
+    }
+  }
+}
