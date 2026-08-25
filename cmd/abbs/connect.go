@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -288,25 +287,7 @@ func validateConnectFlags(username, kind, displayName, profile string, jsonOutpu
 }
 
 func normalizeConnectURL(raw string) (string, error) {
-	normalized := strings.TrimRight(strings.TrimSpace(raw), "/")
-	u, err := url.Parse(normalized)
-	if err != nil || u.Scheme == "" || u.Host == "" || u.Hostname() == "" || u.Opaque != "" {
-		return "", fmt.Errorf("URL %q must be an absolute http or https URL", raw)
-	}
-	u.Scheme = strings.ToLower(u.Scheme)
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("URL %q must use http or https", raw)
-	}
-	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-		return "", fmt.Errorf("URL %q must not contain credentials, a query, or a fragment", raw)
-	}
-	if u.Scheme == "http" {
-		ip := net.ParseIP(u.Hostname())
-		if ip == nil || !ip.IsLoopback() {
-			return "", fmt.Errorf("URL %q must use https unless its host is a loopback IP literal", raw)
-		}
-	}
-	return u.String(), nil
+	return workspace.NormalizeBaseURL(raw)
 }
 
 func comparableConnectURL(raw string) string {
