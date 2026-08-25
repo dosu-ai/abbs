@@ -47,6 +47,7 @@ type apiOperation struct {
 	Usage            string
 	Method           string
 	PathTemplate     string
+	SuccessStatus    int
 	Auth             apiAuthMode
 	Mutating         bool
 	Destructive      bool
@@ -57,37 +58,37 @@ type apiOperation struct {
 // apiOperations is deliberately the single parity registry. The test suite
 // compares its operation IDs with every /v1 operation in the normative spec.
 var apiOperations = []apiOperation{
-	{"getServer", []string{"server", "get"}, "server get", http.MethodGet, "/v1/server", apiNoBearer, false, false, true, runServerGet},
-	{"claimUser", []string{"user", "claim"}, "user claim --username <name> [flags]", http.MethodPost, "/v1/users", apiOptionalBearer, true, false, false, runUserClaim},
-	{"listUsers", []string{"user", "list"}, "user list [flags]", http.MethodGet, "/v1/users", apiBearer, false, false, false, runPage},
-	{"getUser", []string{"user", "get"}, "user get <username>", http.MethodGet, "/v1/users/{username}", apiBearer, false, false, true, runOnePathRead},
-	{"deactivateUser", []string{"user", "deactivate"}, "user deactivate <username> [--yes]", http.MethodPost, "/v1/users/{username}/deactivate", apiBearer, true, true, false, runDestructive},
-	{"createThread", []string{"thread", "create"}, "thread create --title <title> (--content <text> | --content-file <path>) [flags]", http.MethodPost, "/v1/threads", apiBearer, true, false, false, runThreadCreate},
-	{"listThreads", []string{"thread", "list"}, "thread list [flags]", http.MethodGet, "/v1/threads", apiBearer, false, false, true, runThreadList},
-	{"getThread", []string{"thread", "get"}, "thread get <thread-id>", http.MethodGet, "/v1/threads/{thread_id}", apiBearer, false, false, true, runOnePathRead},
-	{"updateThreadTags", []string{"thread", "set-tags"}, "thread set-tags <thread-id> [--tag <tag> ...]", http.MethodPatch, "/v1/threads/{thread_id}", apiBearer, true, false, false, runThreadSetTags},
-	{"listMessages", []string{"thread", "messages"}, "thread messages <thread-id> [flags]", http.MethodGet, "/v1/threads/{thread_id}/messages", apiBearer, false, false, true, runPageWithPath},
-	{"postMessage", []string{"thread", "reply"}, "thread reply <thread-id> (--content <text> | --content-file <path>)", http.MethodPost, "/v1/threads/{thread_id}/messages", apiBearer, true, false, false, runMessageWrite},
-	{"getReadCursor", []string{"thread", "read-cursor"}, "thread read-cursor <thread-id>", http.MethodGet, "/v1/threads/{thread_id}/read-cursor", apiBearer, false, false, false, runOnePathRead},
-	{"setReadCursor", []string{"thread", "mark-read"}, "thread mark-read <thread-id> --seq <cursor>", http.MethodPut, "/v1/threads/{thread_id}/read-cursor", apiBearer, true, false, false, runMarkRead},
-	{"getMessage", []string{"message", "get"}, "message get <message-id>", http.MethodGet, "/v1/messages/{message_id}", apiBearer, false, false, false, runOnePathRead},
-	{"editMessage", []string{"message", "edit"}, "message edit <message-id> (--content <text> | --content-file <path>)", http.MethodPatch, "/v1/messages/{message_id}", apiBearer, true, false, false, runMessageWrite},
-	{"deleteMessage", []string{"message", "delete"}, "message delete <message-id> [--yes]", http.MethodDelete, "/v1/messages/{message_id}", apiBearer, true, true, false, runDestructive},
-	{"listReactions", []string{"reaction", "list"}, "reaction list <message-id> [flags]", http.MethodGet, "/v1/messages/{message_id}/reactions", apiBearer, false, false, false, runPageWithPath},
-	{"addReaction", []string{"reaction", "add"}, "reaction add <message-id> <emoji>", http.MethodPut, "/v1/messages/{message_id}/reactions/{emoji}", apiBearer, true, false, false, runTwoPathMutation},
-	{"removeReaction", []string{"reaction", "remove"}, "reaction remove <message-id> <emoji>", http.MethodDelete, "/v1/messages/{message_id}/reactions/{emoji}", apiBearer, true, false, false, runTwoPathMutation},
-	{"pollEvents", []string{"event", "poll"}, "event poll [filters]", http.MethodGet, "/v1/events", apiBearer, false, false, false, runEventPoll},
-	{"streamEventsWebSocket", []string{"event", "stream"}, "event stream [filters] [--max-events <n>]", http.MethodGet, "/v1/events/ws", apiBearer, false, false, false, runEventStream},
-	{"getInbox", []string{"inbox", "list"}, "inbox list [flags]", http.MethodGet, "/v1/inbox", apiBearer, false, false, false, runPage},
-	{"listTags", []string{"tag", "list"}, "tag list [flags]", http.MethodGet, "/v1/tags", apiBearer, false, false, true, runPage},
-	{"listTagSubscriptions", []string{"tag", "subscription", "list"}, "tag subscription list [flags]", http.MethodGet, "/v1/tag-subscriptions", apiBearer, false, false, false, runPage},
-	{"subscribeTag", []string{"tag", "subscription", "add"}, "tag subscription add <tag>", http.MethodPut, "/v1/tag-subscriptions/{tag}", apiBearer, true, false, false, runOnePathMutation},
-	{"unsubscribeTag", []string{"tag", "subscription", "remove"}, "tag subscription remove <tag>", http.MethodDelete, "/v1/tag-subscriptions/{tag}", apiBearer, true, false, false, runOnePathMutation},
-	{"registerAgent", []string{"agent", "register"}, "agent register --username <name> (--idp-token-file <path> | --idp-token-env <name>)", http.MethodPost, "/v1/agents", apiIDPBearer, true, false, false, runAgentRegister},
-	{"listAgents", []string{"agent", "list"}, "agent list [flags]", http.MethodGet, "/v1/agents", apiBearer, false, false, false, runPage},
-	{"getAgent", []string{"agent", "get"}, "agent get <username>", http.MethodGet, "/v1/agents/{username}", apiBearer, false, false, false, runOnePathRead},
-	{"revokeAgentTokens", []string{"agent", "revoke-tokens"}, "agent revoke-tokens <username> [--yes]", http.MethodDelete, "/v1/agents/{username}/tokens", apiBearer, true, true, false, runDestructive},
-	{"refreshToken", []string{"token", "refresh"}, "token refresh [--refresh-token-file <path> | --refresh-token-env <name>]", http.MethodPost, "/v1/tokens/refresh", apiRefreshSecret, true, false, false, runTokenRefresh},
+	{"getServer", []string{"server", "get"}, "server get", http.MethodGet, "/v1/server", http.StatusOK, apiNoBearer, false, false, true, runServerGet},
+	{"claimUser", []string{"user", "claim"}, "user claim --username <name> [flags]", http.MethodPost, "/v1/users", http.StatusCreated, apiOptionalBearer, true, false, false, runUserClaim},
+	{"listUsers", []string{"user", "list"}, "user list [flags]", http.MethodGet, "/v1/users", http.StatusOK, apiBearer, false, false, false, runPage},
+	{"getUser", []string{"user", "get"}, "user get <username>", http.MethodGet, "/v1/users/{username}", http.StatusOK, apiBearer, false, false, true, runOnePathRead},
+	{"deactivateUser", []string{"user", "deactivate"}, "user deactivate <username> [--yes]", http.MethodPost, "/v1/users/{username}/deactivate", http.StatusOK, apiBearer, true, true, false, runDestructive},
+	{"createThread", []string{"thread", "create"}, "thread create --title <title> (--content <text> | --content-file <path>) [flags]", http.MethodPost, "/v1/threads", http.StatusCreated, apiBearer, true, false, false, runThreadCreate},
+	{"listThreads", []string{"thread", "list"}, "thread list [flags]", http.MethodGet, "/v1/threads", http.StatusOK, apiBearer, false, false, true, runThreadList},
+	{"getThread", []string{"thread", "get"}, "thread get <thread-id>", http.MethodGet, "/v1/threads/{thread_id}", http.StatusOK, apiBearer, false, false, true, runOnePathRead},
+	{"updateThreadTags", []string{"thread", "set-tags"}, "thread set-tags <thread-id> [--tag <tag> ...]", http.MethodPatch, "/v1/threads/{thread_id}", http.StatusOK, apiBearer, true, false, false, runThreadSetTags},
+	{"listMessages", []string{"thread", "messages"}, "thread messages <thread-id> [flags]", http.MethodGet, "/v1/threads/{thread_id}/messages", http.StatusOK, apiBearer, false, false, true, runPageWithPath},
+	{"postMessage", []string{"thread", "reply"}, "thread reply <thread-id> (--content <text> | --content-file <path>)", http.MethodPost, "/v1/threads/{thread_id}/messages", http.StatusCreated, apiBearer, true, false, false, runMessageWrite},
+	{"getReadCursor", []string{"thread", "read-cursor"}, "thread read-cursor <thread-id>", http.MethodGet, "/v1/threads/{thread_id}/read-cursor", http.StatusOK, apiBearer, false, false, false, runOnePathRead},
+	{"setReadCursor", []string{"thread", "mark-read"}, "thread mark-read <thread-id> --seq <cursor>", http.MethodPut, "/v1/threads/{thread_id}/read-cursor", http.StatusNoContent, apiBearer, true, false, false, runMarkRead},
+	{"getMessage", []string{"message", "get"}, "message get <message-id>", http.MethodGet, "/v1/messages/{message_id}", http.StatusOK, apiBearer, false, false, false, runOnePathRead},
+	{"editMessage", []string{"message", "edit"}, "message edit <message-id> (--content <text> | --content-file <path>)", http.MethodPatch, "/v1/messages/{message_id}", http.StatusOK, apiBearer, true, false, false, runMessageWrite},
+	{"deleteMessage", []string{"message", "delete"}, "message delete <message-id> [--yes]", http.MethodDelete, "/v1/messages/{message_id}", http.StatusOK, apiBearer, true, true, false, runDestructive},
+	{"listReactions", []string{"reaction", "list"}, "reaction list <message-id> [flags]", http.MethodGet, "/v1/messages/{message_id}/reactions", http.StatusOK, apiBearer, false, false, false, runPageWithPath},
+	{"addReaction", []string{"reaction", "add"}, "reaction add <message-id> <emoji>", http.MethodPut, "/v1/messages/{message_id}/reactions/{emoji}", http.StatusNoContent, apiBearer, true, false, false, runTwoPathMutation},
+	{"removeReaction", []string{"reaction", "remove"}, "reaction remove <message-id> <emoji>", http.MethodDelete, "/v1/messages/{message_id}/reactions/{emoji}", http.StatusNoContent, apiBearer, true, false, false, runTwoPathMutation},
+	{"pollEvents", []string{"event", "poll"}, "event poll [filters]", http.MethodGet, "/v1/events", http.StatusOK, apiBearer, false, false, false, runEventPoll},
+	{"streamEventsWebSocket", []string{"event", "stream"}, "event stream [filters] [--max-events <n>]", http.MethodGet, "/v1/events/ws", http.StatusSwitchingProtocols, apiBearer, false, false, false, runEventStream},
+	{"getInbox", []string{"inbox", "list"}, "inbox list [flags]", http.MethodGet, "/v1/inbox", http.StatusOK, apiBearer, false, false, false, runPage},
+	{"listTags", []string{"tag", "list"}, "tag list [flags]", http.MethodGet, "/v1/tags", http.StatusOK, apiBearer, false, false, true, runPage},
+	{"listTagSubscriptions", []string{"tag", "subscription", "list"}, "tag subscription list [flags]", http.MethodGet, "/v1/tag-subscriptions", http.StatusOK, apiBearer, false, false, false, runPage},
+	{"subscribeTag", []string{"tag", "subscription", "add"}, "tag subscription add <tag>", http.MethodPut, "/v1/tag-subscriptions/{tag}", http.StatusNoContent, apiBearer, true, false, false, runOnePathMutation},
+	{"unsubscribeTag", []string{"tag", "subscription", "remove"}, "tag subscription remove <tag>", http.MethodDelete, "/v1/tag-subscriptions/{tag}", http.StatusNoContent, apiBearer, true, false, false, runOnePathMutation},
+	{"registerAgent", []string{"agent", "register"}, "agent register --username <name> (--idp-token-file <path> | --idp-token-env <name>)", http.MethodPost, "/v1/agents", http.StatusCreated, apiIDPBearer, true, false, false, runAgentRegister},
+	{"listAgents", []string{"agent", "list"}, "agent list [flags]", http.MethodGet, "/v1/agents", http.StatusOK, apiBearer, false, false, false, runPage},
+	{"getAgent", []string{"agent", "get"}, "agent get <username>", http.MethodGet, "/v1/agents/{username}", http.StatusOK, apiBearer, false, false, false, runOnePathRead},
+	{"revokeAgentTokens", []string{"agent", "revoke-tokens"}, "agent revoke-tokens <username> [--yes]", http.MethodDelete, "/v1/agents/{username}/tokens", http.StatusNoContent, apiBearer, true, true, false, runDestructive},
+	{"refreshToken", []string{"token", "refresh"}, "token refresh [--refresh-token-file <path> | --refresh-token-env <name>]", http.MethodPost, "/v1/tokens/refresh", http.StatusOK, apiRefreshSecret, true, false, false, runTokenRefresh},
 }
 
 const apiUsage = `usage: abbs api [global-flags] <resource> <action> [flags]
@@ -290,11 +291,6 @@ func (e *apiEnvironment) executeHTTP(ctx context.Context, op apiOperation, reque
 	if request.bearerOverride != nil {
 		e.addSecret(*request.bearerOverride)
 	}
-	if op.Auth == apiBearer && !e.global.anonymous {
-		if _, code := e.discover(ctx, c); code != apiOK {
-			return code
-		}
-	}
 	options := make([]client.RequestOption, 0, 2)
 	generatedKey := ""
 	if op.Mutating {
@@ -311,6 +307,9 @@ func (e *apiEnvironment) executeHTTP(ctx context.Context, op apiOperation, reque
 	resp, err := c.DoRaw(ctx, op.Method, request.path, request.query, request.body, options...)
 	if err != nil {
 		return e.writeRequestError(strings.Join(op.CommandPath, " "), err, generatedKey)
+	}
+	if resp.StatusCode != op.SuccessStatus {
+		return e.writeRequestError(strings.Join(op.CommandPath, " "), fmt.Errorf("malformed response: HTTP status %d, want %d", resp.StatusCode, op.SuccessStatus), generatedKey)
 	}
 	if len(resp.Body) == 0 {
 		return apiOK

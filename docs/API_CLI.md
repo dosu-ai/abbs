@@ -29,9 +29,10 @@ ABBS_TOKEN=abbs_... abbs api --url https://bbs.example thread list
 - A profile with `read_only = true` rejects every mutation before making a
   network request.
 
-Authenticated operations validate that discovery reports `api_version: v1`.
-Credential-bootstrap operations (`user claim`, `agent register`, and
-`token refresh`) do not require a prior authenticated discovery request.
+Routine HTTP operations go directly to their documented endpoint instead of
+performing a discovery preflight. This keeps authenticated commands out of the
+anonymous discovery rate-limit budget. `event stream` still discovers the
+server first because it must verify the optional `websocket` capability.
 
 ## Commands
 

@@ -116,6 +116,28 @@ func TestDoRawPreservesAdditiveSuccessAndProblemFields(t *testing.T) {
 	}
 }
 
+func TestDoRawRejectsEmptySuccessExceptNoContent(t *testing.T) {
+	for _, tc := range []struct {
+		status  int
+		wantErr bool
+	}{
+		{http.StatusOK, true},
+		{http.StatusCreated, true},
+		{http.StatusNoContent, false},
+	} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			defer srv.Close()
+			_, err := (&Client{BaseURL: srv.URL}).DoRaw(context.Background(), http.MethodGet, "/v1/test", nil, nil)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("error=%v, wantErr=%v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestStreamEventsHandshakeProblemAndRawFrame(t *testing.T) {
 	var reject bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

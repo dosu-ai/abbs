@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,10 +31,17 @@ func TestAPIOperationRegistryMatchesOpenAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	re := regexp.MustCompile(`(?m)^\s+operationId:\s+([A-Za-z0-9]+)\s*$`)
+	re := regexp.MustCompile(`(?ms)^[ \t]+operationId:[ \t]+([A-Za-z0-9]+)[ \t]*\r?\n.*?^[ \t]+responses:[ \t]*\r?\n[ \t]+"([0-9]{3})":`)
 	var specIDs []string
+	specStatuses := make(map[string]int)
 	for _, match := range re.FindAllSubmatch(b, -1) {
-		specIDs = append(specIDs, string(match[1]))
+		operationID := string(match[1])
+		status, err := strconv.Atoi(string(match[2]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		specIDs = append(specIDs, operationID)
+		specStatuses[operationID] = status
 	}
 	registryIDs := make([]string, 0, len(apiOperations))
 	commands := map[string]string{}
@@ -46,6 +54,9 @@ func TestAPIOperationRegistryMatchesOpenAPI(t *testing.T) {
 		commands[command] = op.OperationID
 		if op.Run == nil {
 			t.Fatalf("%s has no runner", op.OperationID)
+		}
+		if want := specStatuses[op.OperationID]; op.SuccessStatus != want {
+			t.Fatalf("%s success status = %d, want spec status %d", op.OperationID, op.SuccessStatus, want)
 		}
 	}
 	sort.Strings(specIDs)
@@ -111,6 +122,16 @@ func TestAPICommandRequestShapes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			var successStatus int
+			for _, op := range apiOperations {
+				if op.OperationID == tc.name {
+					successStatus = op.SuccessStatus
+					break
+				}
+			}
+			if successStatus == 0 {
+				t.Fatalf("no operation metadata for %s", tc.name)
+			}
 			var mu sync.Mutex
 			var gotMethod, gotPath, gotAuthorization, gotIdempotency string
 			var gotQuery url.Values
@@ -131,8 +152,8 @@ func TestAPICommandRequestShapes(t *testing.T) {
 				gotAuthorization = r.Header.Get("Authorization")
 				gotIdempotency = r.Header.Get("Idempotency-Key")
 				mu.Unlock()
+				w.WriteHeader(successStatus)
 				if tc.noContent {
-					w.WriteHeader(http.StatusNoContent)
 					return
 				}
 				_, _ = io.WriteString(w, ` { "known" : true, "future" : { "value" : 42 } } `)
@@ -203,6 +224,67 @@ func TestAPIAnonymousReadSuppressesProfileCredential(t *testing.T) {
 	}
 }
 
+func TestAPIRoutineAuthenticatedCommandSkipsDiscovery(t *testing.T) {
+	t.Setenv("ABBS_TOKEN", "secret")
+	var discoveryCalls, targetCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/server" {
+			discoveryCalls.Add(1)
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"type":"urn:rate","title":"Rate limited","status":429}`)
+			return
+		}
+		targetCalls.Add(1)
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q", got)
+		}
+		_, _ = io.WriteString(w, `{"items":[]}`)
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := runAPIContext(context.Background(), []string{"--url", srv.URL, "user", "list"}, strings.NewReader(""), &stdout, &stderr)
+	if code != apiOK || discoveryCalls.Load() != 0 || targetCalls.Load() != 1 {
+		t.Fatalf("exit=%d discovery=%d target=%d stdout=%q stderr=%q", code, discoveryCalls.Load(), targetCalls.Load(), stdout.String(), stderr.String())
+	}
+}
+
+func TestAPIRejectsMalformedSuccessStatusOrEmptyBody(t *testing.T) {
+	t.Setenv("ABBS_TOKEN", "secret")
+	tests := []struct {
+		name   string
+		args   []string
+		status int
+		body   string
+		want   int
+	}{
+		{"200 without body", []string{"server", "get"}, http.StatusOK, "", apiIOExit},
+		{"unexpected 204", []string{"server", "get"}, http.StatusNoContent, "", apiIOExit},
+		{"documented 204", []string{"reaction", "add", "message", "👍", "--idempotency-key", "fixed"}, http.StatusNoContent, "", apiOK},
+		{"bodyless operation returned 200", []string{"reaction", "add", "message", "👍", "--idempotency-key", "fixed"}, http.StatusOK, `{}`, apiIOExit},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.body != "" {
+					w.Header().Set("Content-Type", "application/json")
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			args := append([]string{"--url", srv.URL}, tc.args...)
+			var stdout, stderr bytes.Buffer
+			code := runAPIContext(context.Background(), args, strings.NewReader(""), &stdout, &stderr)
+			if code != tc.want {
+				t.Fatalf("exit=%d, want %d; stdout=%q stderr=%q", code, tc.want, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestAPIJSONProblemAndStableHTTPExit(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/problem+json")
@@ -270,6 +352,9 @@ func TestAPIContentFromStdinAndClearTags(t *testing.T) {
 		}
 		b, _ := io.ReadAll(r.Body)
 		bodies = append(bodies, b)
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusCreated)
+		}
 		_, _ = io.WriteString(w, `{}`)
 	}))
 	defer srv.Close()

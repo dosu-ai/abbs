@@ -186,6 +186,9 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, query url.Value
 		_ = json.Unmarshal(b, &apiErr.Problem)
 		return RawResponse{}, apiErr
 	}
+	if len(b) == 0 && resp.StatusCode != http.StatusNoContent {
+		return RawResponse{}, fmt.Errorf("HTTP %d response has no JSON body", resp.StatusCode)
+	}
 	if len(b) > 0 {
 		if !isJSONContentType(resp.Header.Get("Content-Type")) {
 			return RawResponse{}, fmt.Errorf("HTTP %d response has non-JSON Content-Type %q", resp.StatusCode, resp.Header.Get("Content-Type"))
