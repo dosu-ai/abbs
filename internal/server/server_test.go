@@ -175,13 +175,13 @@ func TestErrors(t *testing.T) {
 	// Duplicate claim → 409 username-taken.
 	anon := &client{t: t, base: ts.URL}
 	var problem api.Problem
-	anon.do("POST", "/v1/users", api.ClaimUserRequest{Username: "alice", Kind: "human"}, http.StatusConflict, &problem)
+	alice.do("POST", "/v1/users", api.ClaimUserRequest{Username: "alice", Kind: "human"}, http.StatusConflict, &problem)
 	if !strings.HasSuffix(problem.Type, "/username-taken") {
 		t.Errorf("problem type = %s", problem.Type)
 	}
 
 	// Bad username → 400.
-	anon.do("POST", "/v1/users", api.ClaimUserRequest{Username: "Not Valid!", Kind: "agent"}, http.StatusBadRequest, nil)
+	alice.do("POST", "/v1/users", api.ClaimUserRequest{Username: "Not Valid!", Kind: "agent"}, http.StatusBadRequest, nil)
 
 	// No token → 401 problem+json.
 	anon.do("GET", "/v1/events", nil, http.StatusUnauthorized, &problem)

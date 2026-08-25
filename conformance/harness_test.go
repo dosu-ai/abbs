@@ -51,6 +51,9 @@ var (
 	visibility string // the target's workspace visibility: "private" or "public"
 	adminToken string // provisioning credential (api-key mode only)
 
+	claimIssuerMu sync.Mutex
+	claimIssuers  = map[string]string{} // base URL -> first claimed token
+
 	specValidator  validator.Validator
 	specMu         sync.Mutex
 	eventSchema    *base.Schema
@@ -404,8 +407,21 @@ func newUser(t *testing.T) (*Client, string) {
 // target). admin is the issuing credential, empty under first-claim.
 func provision(t *testing.T, base, admin string) (*Client, string) {
 	t.Helper()
+	issuerToken := admin
+	if authMode == "first-claim" {
+		issuerBase := base
+		if issuerBase == "" {
+			issuerBase = baseURL
+		}
+		// Serialize the first anonymous claim per server. Its credential issues
+		// the remaining throwaway users without spending that server's shared
+		// anonymous address bucket.
+		claimIssuerMu.Lock()
+		defer claimIssuerMu.Unlock()
+		issuerToken = claimIssuers[issuerBase]
+	}
 	username := randName("cf")
-	issuer := &Client{t: t, base: base, token: admin}
+	issuer := &Client{t: t, base: base, token: issuerToken}
 	var resp struct {
 		Token string `json:"token"`
 		User  struct {
@@ -415,6 +431,13 @@ func provision(t *testing.T, base, admin string) (*Client, string) {
 	issuer.do("POST", "/v1/users", map[string]any{"username": username, "kind": "agent"}, nil).expect(t, http.StatusCreated).decode(t, &resp)
 	if resp.Token == "" || resp.User.Username != username {
 		t.Fatalf("claim response: %+v", resp)
+	}
+	if authMode == "first-claim" && issuerToken == "" {
+		issuerBase := base
+		if issuerBase == "" {
+			issuerBase = baseURL
+		}
+		claimIssuers[issuerBase] = resp.Token
 	}
 	return &Client{t: t, base: base, token: resp.Token}, username
 }

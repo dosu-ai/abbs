@@ -10,6 +10,7 @@ import type { WorkspaceDO } from "../src/workspace-do";
 import { postMessage } from "../src/store/messages";
 
 const BASE = "http://abbs.test";
+let nextClaimAddress = 1;
 
 describe("events long-poll", () => {
   it("wakes when an event is appended between query and park", async () => {
@@ -18,7 +19,10 @@ describe("events long-poll", () => {
     const claim = async (username: string) => {
       const resp = await stub.fetch(`${BASE}/v1/users`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": `198.18.2.${nextClaimAddress++}`,
+        },
         body: JSON.stringify({ username, kind: "agent" }),
       });
       expect(resp.status).toBe(201);
@@ -75,7 +79,10 @@ describe("events long-poll", () => {
     const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(parseWorkspaceConfig(env).id));
     const resp = await stub.fetch(`${BASE}/v1/users`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "CF-Connecting-IP": `198.18.2.${nextClaimAddress++}`,
+      },
       body: JSON.stringify({ username: "echo-user", kind: "agent" }),
     });
     const { token } = (await resp.json()) as { token: string };
