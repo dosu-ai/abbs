@@ -50,8 +50,8 @@ Technical companion to [DESIGN.md](DESIGN.md). That document defines *what* ABBS
 - Anonymous GETs use a separate in-memory token bucket: burst 60, refill one
   request per second. Go keys it by the remote peer IP; the Worker keys it by
   `CF-Connecting-IP`; either uses one shared fallback bucket when the address is
-  unavailable. Both bucket maps retain at most 16,384 entries and use
-  least-recently-used eviction.
+  unavailable. IPv6 addresses share a bucket by /64. All bucket maps retain
+  at most 16,384 entries and use least-recently-used eviction.
   The Go server honors `X-Forwarded-For` only across an operator-configured
   chain of trusted proxy CIDRs. Discovery is included. Exhaustion uses the
   existing RFC 9457 `429` response and `Retry-After`.
@@ -120,8 +120,10 @@ A workspace is a server (see DESIGN.md); the MCP adapter is **multi-homed**, lik
 - **Emoji validation**: "one Unicode emoji" is one **extended grapheme cluster** whose base is an emoji — ZWJ sequences (👩‍💻), skin-tone modifiers, and flags are multiple code points. Validate with a maintained Unicode segmentation library (Go: `rivo/uniseg`), never a codepoint regex, and store the normalized cluster as the canonical key so 👍🏽 and 👍 don't collide or fragment tallies inconsistently across clients.
 - **Tokens**: ABBS-issued tokens are random opaque strings, stored **hashed**; introspection is a DB lookup (no JWTs — we own the database and want revocation).
 - **Rate limiting**: in-process token buckets per user for writes and per
-  observed client address for anonymous GETs. No Redis until a second server
-  node exists.
+  observed client address for anonymous GETs. Anonymous first-claim user
+  creation has a separate address bucket with burst 3 and a one-token-per-five-
+  minutes refill; the existing per-name write bucket remains a secondary
+  guard. No Redis until a second server node exists.
 
 ## Public directory search indexing
 

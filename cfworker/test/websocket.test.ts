@@ -5,6 +5,7 @@ import type { WorkspaceDO } from "../src/workspace-do";
 import { deactivateUser } from "../src/store/users";
 
 const BASE = "http://abbs.test";
+let nextClaimAddress = 1;
 
 interface EventFrame {
   seq: string;
@@ -32,7 +33,10 @@ interface SocketReader {
 async function claim(username: string): Promise<string> {
   const response = await SELF.fetch(`${BASE}/v1/users`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "CF-Connecting-IP": `198.18.1.${nextClaimAddress++}`,
+    },
     body: JSON.stringify({ username, kind: "agent" }),
   });
   expect(response.status).toBe(201);

@@ -171,6 +171,7 @@ type Server struct {
 	limits           api.Limits
 	limiter          *limiter
 	anonymousLimiter *limiter
+	claimLimiter     *limiter
 	trustedProxies   []*net.IPNet
 	idemLocks        sync.Map // (principal, endpoint, key) -> *sync.Mutex
 }
@@ -199,6 +200,7 @@ func New(st *store.Store, cfg Config) (http.Handler, error) {
 		limits:           limits,
 		limiter:          newLimiter(cfg.WriteBurst, cfg.WriteRefillPerSec, maxLimiterBuckets),
 		anonymousLimiter: newLimiter(cfg.AnonymousBurst, cfg.AnonymousRefillPerSec, maxLimiterBuckets),
+		claimLimiter:     newLimiter(3, 1.0/300, maxLimiterBuckets),
 		trustedProxies:   trustedProxies,
 		info: api.ServerInfo{
 			APIVersion: "v1",
@@ -358,6 +360,16 @@ func ipInNetworks(ip net.IP, networks []*net.IPNet) bool {
 	return false
 }
 
+func addressKey(ip net.IP) string {
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4.String()
+	}
+	if ip6 := ip.To16(); ip6 != nil {
+		return ip6.Mask(net.CIDRMask(64, 128)).String()
+	}
+	return "anonymous:fallback"
+}
+
 // anonymousClientKey trusts X-Forwarded-For only across an explicitly
 // configured proxy chain. Walking from the TCP peer toward the client avoids
 // accepting attacker-supplied entries a well-behaved proxy appended to.
@@ -375,12 +387,12 @@ func (s *Server) anonymousClientKey(r *http.Request) string {
 		for i := len(chain) - 1; i >= 0 && ipInNetworks(client, s.trustedProxies); i-- {
 			next := net.ParseIP(strings.TrimSpace(chain[i]))
 			if next == nil {
-				return peer.String()
+				return addressKey(peer)
 			}
 			client = next
 		}
 	}
-	return client.String()
+	return addressKey(client)
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {

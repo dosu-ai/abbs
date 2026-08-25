@@ -1,7 +1,7 @@
 // Port of the limiter in internal/server/middleware.go: an in-process token
 // bucket keyed by username for writes or observed address for anonymous
-// reads. In-memory state is lost on DO eviction, the same property as a Go
-// server restart; accepted.
+// reads and claims. In-memory state is lost on DO eviction, the same property
+// as a Go server restart; accepted.
 
 interface Bucket {
   tokens: number;
@@ -40,7 +40,7 @@ export class RateLimiter {
       b.tokens--;
       return { ok: true, retryAfter: 0 };
     }
-    let secs = Math.trunc((1 - b.tokens) / this.refillPerSec);
+    let secs = Math.ceil((1 - b.tokens) / this.refillPerSec);
     if (secs < 1) secs = 1;
     return { ok: false, retryAfter: secs };
   }

@@ -1,5 +1,6 @@
-// Port of internal/server/middleware.go — the two write-path behaviors, in
-// the same order as the Go write() wrapper: per-user rate limit, then
+// Port of internal/server/middleware.go — the shared write-path behaviors,
+// in the same order as the Go write() wrapper after its anonymous-claim
+// address gate (applied by workspace-do.ts): per-user rate limit, then
 // Idempotency-Key semantics (per principal, per endpoint — the endpoint is
 // the exact route-pattern string — ≥24h retention; identical replay returns
 // the original response, headers included; body mismatch is a 409;

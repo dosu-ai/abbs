@@ -45,6 +45,14 @@ describe("RateLimiter", () => {
     expect(denied.retryAfter).toBe(10);
   });
 
+  it("rounds fractional Retry-After waits up", () => {
+    const l = new RateLimiter(1, 1 / 300);
+    expect(l.allow("a", 0).ok).toBe(true);
+    const denied = l.allow("a", 1_100);
+    expect(denied.ok).toBe(false);
+    expect(denied.retryAfter).toBe(299);
+  });
+
   it("tracks users independently", () => {
     const l = new RateLimiter(1, 1);
     expect(l.allow("a", 0).ok).toBe(true);

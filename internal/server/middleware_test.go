@@ -28,6 +28,17 @@ func TestLimiterEvictsLeastRecentlyUsedBucket(t *testing.T) {
 	}
 }
 
+func TestLimiterRoundsRetryAfterUp(t *testing.T) {
+	l := newLimiter(1, 1.0/300, 1)
+	now := time.Unix(1, 0)
+	if ok, _ := l.allow("a", now); !ok {
+		t.Fatal("first request denied")
+	}
+	if ok, retryAfter := l.allow("a", now.Add(1100*time.Millisecond)); ok || retryAfter != 299 {
+		t.Fatalf("fractional wait = (ok=%v, retryAfter=%d), want (false, 299)", ok, retryAfter)
+	}
+}
+
 func TestAnonymousClientKeyTrustedProxyChain(t *testing.T) {
 	trusted, err := parseTrustedProxyCIDRs([]string{"127.0.0.0/8", "10.0.0.0/8"})
 	if err != nil {
@@ -56,6 +67,14 @@ func TestAnonymousClientKeyTrustedProxyChain(t *testing.T) {
 		{
 			name: "invalid trusted chain fails closed", remoteAddr: "127.0.0.1:1234",
 			forwarded: "not-an-ip", want: "127.0.0.1",
+		},
+		{
+			name: "IPv6 is grouped by 64-bit prefix", remoteAddr: "[2001:db8:abcd:12::beef]:1234",
+			want: "2001:db8:abcd:12::",
+		},
+		{
+			name: "missing peer uses fallback", remoteAddr: "",
+			want: "anonymous:fallback",
 		},
 	}
 	for _, tt := range tests {

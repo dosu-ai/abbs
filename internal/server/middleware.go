@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -16,8 +17,8 @@ import (
 )
 
 // limiter is an in-process token bucket keyed by the caller-selected identity
-// (username for writes, observed address for anonymous reads). No Redis until
-// a second server node exists.
+// (username for writes, observed address for anonymous reads and claims). No
+// Redis until a second server node exists.
 type limiter struct {
 	mu         sync.Mutex
 	burst      float64
@@ -65,7 +66,7 @@ func (l *limiter) allow(user string, at time.Time) (ok bool, retryAfter int) {
 		b.tokens--
 		return true, 0
 	}
-	secs := int((1 - b.tokens) / l.refill)
+	secs := int(math.Ceil((1 - b.tokens) / l.refill))
 	if secs < 1 {
 		secs = 1
 	}
@@ -96,11 +97,11 @@ func (r *recorder) flush(w http.ResponseWriter) {
 	w.Write(r.body.Bytes())
 }
 
-// write wraps a mutating handler with the two write-path behaviors: the
-// per-user rate limit and Idempotency-Key semantics (per principal, per
-// endpoint, ≥24h retention; identical replay returns the original response;
-// body mismatch is a 409). endpoint is the route pattern — the spec's
-// per-endpoint scope.
+// write wraps a mutating handler with the write-path behaviors: the anonymous
+// claim address limit, per-user rate limit, and Idempotency-Key semantics (per
+// principal, per endpoint, ≥24h retention; identical replay returns the
+// original response; body mismatch is a 409). endpoint is the route pattern —
+// the spec's per-endpoint scope.
 func (s *Server) write(endpoint string, handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Read and restore the body: the principal for the claim endpoint,
@@ -112,7 +113,15 @@ func (s *Server) write(endpoint string, handler http.HandlerFunc) http.HandlerFu
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 
-		principal := s.principalFor(r, body)
+		principal, activeBearer := s.principalFor(r, body)
+		if endpoint == "POST /v1/users" && !activeBearer {
+			if ok, retryAfter := s.claimLimiter.allow(s.anonymousClientKey(r), time.Now()); !ok {
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+				writeProblem(w, http.StatusTooManyRequests, "rate-limited", "anonymous claim rate limit")
+				return
+			}
+		}
+
 		if principal != "" {
 			if ok, retryAfter := s.limiter.allow(principal, time.Now()); !ok {
 				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
@@ -174,23 +183,25 @@ func (s *Server) write(endpoint string, handler http.HandlerFunc) http.HandlerFu
 	}
 }
 
-// principalFor identifies who a write is charged to: the bearer principal,
-// or — for the unauthenticated claim endpoint — the username being claimed.
-// Empty means unidentifiable (the handler's own auth will reject it).
-func (s *Server) principalFor(r *http.Request, body []byte) string {
+// principalFor identifies who a write is charged to and whether the request
+// carries a bearer credential for an active user. The principal is the active
+// bearer user, or — for the unauthenticated claim endpoint — the username
+// being claimed. Empty means unidentifiable (the handler's own auth will
+// reject it).
+func (s *Server) principalFor(r *http.Request, body []byte) (principal string, activeBearer bool) {
 	if token, ok := bearerToken(r); ok {
-		if user, err := s.store.UserByTokenHash(hashToken(token)); err == nil {
-			return user.Username
+		if user, err := s.store.UserByTokenHash(hashToken(token)); err == nil && !user.Deactivated {
+			return user.Username, true
 		}
-		return ""
+		return "", false
 	}
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/users" {
 		var req struct {
 			Username string `json:"username"`
 		}
 		if json.Unmarshal(body, &req) == nil && req.Username != "" {
-			return "claim:" + req.Username
+			return "claim:" + req.Username, false
 		}
 	}
-	return ""
+	return "", false
 }

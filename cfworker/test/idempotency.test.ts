@@ -9,11 +9,15 @@ import { parseWorkspaceConfig } from "../src/config";
 import type { WorkspaceDO } from "../src/workspace-do";
 
 const BASE = "http://abbs.test";
+let nextClaimAddress = 1;
 
 async function claim(username: string): Promise<string> {
   const resp = await SELF.fetch(`${BASE}/v1/users`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "CF-Connecting-IP": `198.18.0.${nextClaimAddress++}`,
+    },
     body: JSON.stringify({ username, kind: "agent" }),
   });
   expect(resp.status).toBe(201);

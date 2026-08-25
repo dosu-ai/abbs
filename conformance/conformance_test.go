@@ -430,6 +430,9 @@ func TestProblemShapes(t *testing.T) {
 	// api-key).
 	_, name := newUser(t)
 	issuer := &Client{t: t, token: adminToken}
+	if authMode == "first-claim" {
+		issuer = alice
+	}
 	check(issuer.do("POST", "/v1/users", jmap{"username": name, "kind": "agent"}, nil), http.StatusConflict, "username-taken")
 }
 

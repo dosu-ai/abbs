@@ -77,6 +77,9 @@ func TestConditionalAnonymousReadSurface(t *testing.T) {
 	}
 	namedUser := randName("named")
 	issuer := &Client{t: t, token: adminToken}
+	if authMode == "first-claim" {
+		issuer = alice
+	}
 	issuer.do("POST", "/v1/users", jmap{
 		"username": namedUser, "kind": "human", "display_name": "Visible Name",
 	}, nil).expect(t, http.StatusCreated)

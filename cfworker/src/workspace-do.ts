@@ -92,6 +92,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   private router = new Router();
   private limiter = new RateLimiter(60, 1); // burst 60, 1 token/s — the Go defaults
   private anonymousLimiter = new RateLimiter(60, 1);
+  private claimLimiter = new RateLimiter(3, 1 / 300);
   private cfg: ServerCfg;
   private limits: Limits;
   private info: ServerInfo;
@@ -359,6 +360,18 @@ export class WorkspaceDO extends DurableObject<Env> {
       };
 
       if (m.entry.write) {
+        if (m.entry.pattern === "POST /v1/users") {
+          const bearerUser = tokenHash === null ? null : userByTokenHash(this.store, tokenHash);
+          const hasActiveBearer = bearerUser !== null && !bearerUser.deactivated;
+          if (!hasActiveBearer) {
+            const { ok, retryAfter } = this.claimLimiter.allow(this.anonymousClientKey(request), Date.now());
+            if (!ok) {
+              throw new ProblemError(429, "rate-limited", "anonymous claim rate limit", {
+                "Retry-After": String(retryAfter),
+              });
+            }
+          }
+        }
         return await writeWrapped(
           { limiter: this.limiter, withIdemLock: (k, f) => this.withIdemLock(k, f) },
           c,
@@ -374,14 +387,40 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   private allowAnonymous(request: Request): void {
-    const observed = (request.headers.get("CF-Connecting-IP") ?? "").trim();
-    const key = observed === "" ? "anonymous:fallback" : observed;
-    const { ok, retryAfter } = this.anonymousLimiter.allow(key, Date.now());
+    const { ok, retryAfter } = this.anonymousLimiter.allow(this.anonymousClientKey(request), Date.now());
     if (!ok) {
       throw new ProblemError(429, "rate-limited", "anonymous read rate limit", {
         "Retry-After": String(retryAfter),
       });
     }
+  }
+
+  private anonymousClientKey(request: Request): string {
+    const observed = (request.headers.get("CF-Connecting-IP") ?? "").trim();
+    if (observed === "") return "anonymous:fallback";
+    return ipv6Prefix(observed) ?? observed;
+  }
+}
+
+function ipv6Prefix(address: string): string | null {
+  if (!address.includes(":")) return null;
+  try {
+    const hostname = new URL(`http://[${address}]/`).hostname;
+    if (!hostname.startsWith("[") || !hostname.endsWith("]")) return null;
+    const normalized = hostname.slice(1, -1);
+    const halves = normalized.split("::");
+    if (halves.length > 2) return null;
+    const left = halves[0] === "" ? [] : halves[0].split(":");
+    const right = halves.length === 1 || halves[1] === "" ? [] : halves[1].split(":");
+    const omitted = halves.length === 2 ? 8 - left.length - right.length : 0;
+    const parts = [...left, ...Array<string>(omitted).fill("0"), ...right];
+    if (parts.length !== 8) return null;
+    return parts
+      .slice(0, 4)
+      .map((part) => Number.parseInt(part, 16).toString(16))
+      .join(":");
+  } catch {
+    return null;
   }
 }
 
