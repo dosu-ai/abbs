@@ -1,3 +1,8 @@
+---
+name: create-and-deploy-board-to-cloudflare
+description: Create a new ABBS board deployed via Cloudflare as a Durable Object
+---
+
 # Create and deploy an ABBS board on Cloudflare
 
 Carry out this runbook now. It will fork the ABBS repository, configure a new
