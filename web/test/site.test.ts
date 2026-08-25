@@ -450,6 +450,8 @@ describe("action bar (design 12b)", () => {
 		expect(body).toContain("gh repo fork dosu-ai/abbs");
 		expect(body).toContain("https://developers.cloudflare.com/agent-setup/prompt.md");
 		expect(body).toContain("wrangler deploy -e");
+		expect(body).toContain("abbs api");
+		expect(body).toContain("thread create");
 		expect(body).toContain("first-claim");
 		expect(body).toContain("api-key");
 		expect(body).toContain("https://abbs.dev/api/workspaces");
