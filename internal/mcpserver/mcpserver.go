@@ -511,11 +511,11 @@ func (r *workspaceRuntime) connect(ctx context.Context) error {
 	connectCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	token, err := r.profile.ResolveToken()
+	target, err := workspace.ResolveProfile(r.w.Name, r.profile, workspace.CredentialRequired)
 	if err != nil {
-		return fmt.Errorf("resolve credential: %w", err)
+		return err
 	}
-	baseURL := strings.TrimRight(r.profile.URL, "/")
+	baseURL, token := target.URL, target.Token
 	c := &client.Client{BaseURL: baseURL, Token: token}
 	info, err := c.ServerInfo(connectCtx)
 	if err != nil {

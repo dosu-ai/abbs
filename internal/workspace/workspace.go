@@ -9,6 +9,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,7 +42,60 @@ type file struct {
 	Workspaces map[string]Profile `toml:"workspaces"`
 }
 
+// CredentialMode controls whether resolving a target suppresses, optionally
+// reads, or requires an ABBS bearer credential.
+type CredentialMode uint8
+
+const (
+	CredentialNone CredentialMode = iota
+	CredentialOptional
+	CredentialRequired
+)
+
+// Target is one resolved API destination. ReadOnly is meaningful only for a
+// named profile; direct URL invocations have no profile posture.
+type Target struct {
+	Name     string
+	URL      string
+	Token    string
+	ReadOnly bool
+}
+
+type ResolveOptions struct {
+	ConfigPath string
+	Workspace  string
+	URL        string
+	TokenFile  string
+	TokenEnv   string
+	Credential CredentialMode
+	Mutating   bool
+}
+
 var profileNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// NormalizeBaseURL applies the same target rules to connect, MCP, and API
+// commands. Plain HTTP is intentionally limited to loopback IP literals.
+func NormalizeBaseURL(raw string) (string, error) {
+	normalized := strings.TrimRight(strings.TrimSpace(raw), "/")
+	u, err := url.Parse(normalized)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.Hostname() == "" || u.Opaque != "" {
+		return "", fmt.Errorf("URL %q must be an absolute http or https URL", raw)
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("URL %q must use http or https", raw)
+	}
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return "", fmt.Errorf("URL %q must not contain credentials, a query, or a fragment", raw)
+	}
+	if u.Scheme == "http" {
+		ip := net.ParseIP(u.Hostname())
+		if ip == nil || !ip.IsLoopback() {
+			return "", fmt.Errorf("URL %q must use https unless its host is a loopback IP literal", raw)
+		}
+	}
+	return u.String(), nil
+}
 
 // DefaultConfigPath is ~/.config/abbs/workspaces.toml (overridable via
 // ABBS_CONFIG or the -config flag).
@@ -270,6 +325,101 @@ func (p Profile) ResolveToken() (string, error) {
 		return "", fmt.Errorf("token_env %s is empty", p.TokenEnv)
 	}
 	return "", fmt.Errorf("no credential: set token, token_file, or token_env")
+}
+
+func (p Profile) hasCredentialSource() bool {
+	return p.Token != "" || p.TokenFile != "" || p.TokenEnv != ""
+}
+
+// ResolveProfile normalizes a profile and resolves its credential. MCP and
+// one-shot API commands share this primitive so target behavior cannot drift.
+func ResolveProfile(name string, p Profile, mode CredentialMode) (Target, error) {
+	baseURL, err := NormalizeBaseURL(p.URL)
+	if err != nil {
+		return Target{}, fmt.Errorf("workspace %q: %w", name, err)
+	}
+	target := Target{Name: name, URL: baseURL, ReadOnly: p.ReadOnly}
+	if mode == CredentialNone {
+		return target, nil
+	}
+	if !p.hasCredentialSource() {
+		if mode == CredentialRequired {
+			return Target{}, fmt.Errorf("workspace %q: no credential: set token, token_file, or token_env", name)
+		}
+		return target, nil
+	}
+	target.Token, err = p.ResolveToken()
+	if err != nil {
+		return Target{}, fmt.Errorf("workspace %q: resolve credential: %w", name, err)
+	}
+	if mode == CredentialRequired && target.Token == "" {
+		return Target{}, fmt.Errorf("workspace %q: resolved credential is empty", name)
+	}
+	return target, nil
+}
+
+// ResolveTarget selects either a named profile (or the sole profile) or a
+// direct URL. Mutating read-only profiles are rejected before credentials are
+// read and before any network request can be made.
+func ResolveTarget(opts ResolveOptions) (Target, error) {
+	if opts.URL != "" && opts.Workspace != "" {
+		return Target{}, fmt.Errorf("--url and --workspace are mutually exclusive")
+	}
+	if opts.URL != "" {
+		if opts.TokenFile != "" && opts.TokenEnv != "" {
+			return Target{}, fmt.Errorf("--token-file and --token-env are mutually exclusive")
+		}
+		baseURL, err := NormalizeBaseURL(opts.URL)
+		if err != nil {
+			return Target{}, err
+		}
+		target := Target{URL: baseURL}
+		if opts.Credential == CredentialNone {
+			return target, nil
+		}
+		switch {
+		case opts.TokenFile != "":
+			b, err := os.ReadFile(opts.TokenFile)
+			if err != nil {
+				return Target{}, fmt.Errorf("read token file %s: %w", opts.TokenFile, err)
+			}
+			target.Token = strings.TrimSpace(string(b))
+		case opts.TokenEnv != "":
+			target.Token = os.Getenv(opts.TokenEnv)
+		}
+		if opts.Credential == CredentialRequired && target.Token == "" {
+			if opts.TokenEnv != "" {
+				return Target{}, fmt.Errorf("token environment variable %s is empty", opts.TokenEnv)
+			}
+			return Target{}, fmt.Errorf("no credential: pass --token-file or --token-env")
+		}
+		return target, nil
+	}
+	if opts.TokenFile != "" || opts.TokenEnv != "" {
+		return Target{}, fmt.Errorf("--token-file and --token-env require --url; profile credentials come from the workspace config")
+	}
+	if opts.ConfigPath == "" {
+		opts.ConfigPath = DefaultConfigPath()
+	}
+	profiles, names, err := Load(opts.ConfigPath)
+	if err != nil {
+		return Target{}, err
+	}
+	name := opts.Workspace
+	if name == "" {
+		if len(names) != 1 {
+			return Target{}, fmt.Errorf("several workspaces are configured — pass --workspace: one of %s", strings.Join(names, ", "))
+		}
+		name = names[0]
+	}
+	p, ok := profiles[name]
+	if !ok {
+		return Target{}, fmt.Errorf("unknown workspace %q — configured: %s", name, strings.Join(names, ", "))
+	}
+	if opts.Mutating && p.ReadOnly {
+		return Target{}, fmt.Errorf("workspace %q is read-only (read_only posture in its profile); writes are refused", name)
+	}
+	return ResolveProfile(name, p, opts.Credential)
 }
 
 // CachePath names the per-workspace cache file. The hash covers URL and

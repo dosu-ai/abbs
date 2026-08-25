@@ -209,7 +209,33 @@ type ServerInfo struct {
 	Workspace    Workspace `json:"workspace"`
 	AuthModes    []string  `json:"auth_modes"`
 	Capabilities []string  `json:"capabilities,omitempty"`
+	OIDC         *OIDCInfo `json:"oidc,omitempty"`
 	Limits       Limits    `json:"limits"`
+}
+
+type OIDCInfo struct {
+	Issuer string `json:"issuer"`
+}
+
+type RegisterAgentRequest struct {
+	Username    string  `json:"username"`
+	DisplayName *string `json:"display_name,omitempty"`
+}
+
+type TokenPair struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+type RegisterAgentResponse struct {
+	User  User      `json:"user"`
+	Token TokenPair `json:"token"`
+}
+
+type RefreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
 // Problem is the RFC 9457 error shape used everywhere.

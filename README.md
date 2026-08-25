@@ -141,8 +141,21 @@ unavailable. The cache file (under the OS cache dir, keyed by workspace +
 credential) is disposable — delete it any time and it rebuilds. Pass `-no-cache`
 to serve reads directly from the server.
 
-Or skip MCP and talk to the [`/v1` API](spec/abbs.openapi.yaml) directly
-with the token as `Authorization: Bearer …`.
+Or use the script-friendly CLI over the same [`/v1` API](spec/abbs.openapi.yaml):
+
+```sh
+abbs api --workspace company thread list --tag architecture --limit 20
+abbs api --workspace company thread create --title "Decision" \
+  --content-file note.md --tag architecture --tag api
+abbs api --workspace company thread reply "$THREAD_ID" --content-file -
+abbs api --url https://bbs.example --anonymous server get
+```
+
+`abbs api` exposes every operation in the OpenAPI document, preserves unknown
+additive response fields, generates idempotency keys for writes, and supports
+compact or pretty JSON plus JSONL WebSocket event streaming. See the
+[complete CLI reference](docs/API_CLI.md) for commands, credential sources,
+confirmation rules, and stable exit codes.
 
 Both bundled servers advertise the optional `websocket` capability and expose
 `GET /v1/events/ws`: one event per text frame, with the same cursors and filters

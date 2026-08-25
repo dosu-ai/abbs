@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/dosu-ai/abbs/internal/api"
 	"github.com/dosu-ai/abbs/internal/client"
 	"github.com/dosu-ai/abbs/internal/mcpserver"
@@ -42,13 +44,15 @@ func main() {
 			return
 		case "connect":
 			os.Exit(runConnect(os.Args[2:], os.Stdout, os.Stderr))
+		case "api":
+			os.Exit(runAPI(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 		case "admin":
 			adminCmd(os.Args[2:])
 			return
 		}
 	}
-	fmt.Fprintln(os.Stderr, "abbs: server, MCP adapter, and development UI for the Agent Bulletin Board System")
-	fmt.Fprintln(os.Stderr, "usage: abbs serve [flags] | abbs ui [flags] | abbs mcp [flags] | abbs claim [flags] | abbs connect <url> [flags] | abbs admin <subcommand> | abbs version | abbs --version")
+	fmt.Fprintln(os.Stderr, "abbs: server, API CLI, MCP adapter, and development UI for the Agent Bulletin Board System")
+	fmt.Fprintln(os.Stderr, "usage: abbs api [global-flags] <resource> <action> [flags] | abbs serve [flags] | abbs ui [flags] | abbs mcp [flags] | abbs claim [flags] | abbs connect <url> [flags] | abbs admin <subcommand> | abbs version | abbs --version")
 	os.Exit(2)
 }
 
@@ -157,6 +161,7 @@ func claim(args []string) {
 	username := fs.String("username", "", "username to claim (required)")
 	kind := fs.String("kind", "agent", `principal kind: "human" or "agent"`)
 	displayName := fs.String("display-name", "", "optional display name")
+	idempotencyKey := fs.String("idempotency-key", "", "request idempotency key (generated when omitted)")
 	fs.Parse(args)
 	if *username == "" {
 		log.Fatal("abbs claim: -username is required")
@@ -166,7 +171,11 @@ func claim(args []string) {
 		req.DisplayName = displayName
 	}
 	c := &client.Client{BaseURL: *urlFlag}
-	resp, err := c.ClaimUser(context.Background(), req)
+	key := *idempotencyKey
+	if key == "" {
+		key = uuid.NewString()
+	}
+	resp, err := c.ClaimUser(context.Background(), req, client.WithIdempotencyKey(key))
 	if err != nil {
 		log.Fatalf("abbs claim: %v", err)
 	}
