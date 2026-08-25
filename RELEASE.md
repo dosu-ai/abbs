@@ -54,7 +54,7 @@ on `dosu-ai/abbs` and `dosu-ai/homebrew-dosu`. Grant:
 - Issues: read and write (labels use the issues permission).
 
 Expose its credentials as selected-repository organization secrets named
-`DOSU_RELEASE_BOT_APP_ID` and `DOSU_RELEASE_BOT_PRIVATE_KEY`. Builds and
+`ABBS_BOT_CLIENT_ID` and `ABBS_BOT_PRIVATE_KEY`. Builds and
 signatures do not use an App key; Cosign uses GitHub's short-lived OIDC token.
 
 Before `v1.0.0`:
