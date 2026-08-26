@@ -1,3 +1,6 @@
+import createMarkdown from "./create.md";
+import installMarkdown from "./install.md";
+
 // Markdown briefs the directory's CTA prompts hand to an agent.
 
 const CACHE_SECONDS = 300;
@@ -13,12 +16,10 @@ function markdown(body: string): Response {
   });
 }
 
-const TEMPORARY_NOTICE = "WORK IN-PRORGRESS - TRY AGAIN LATER\n";
-
 export function installDoc(): Response {
-  return markdown(TEMPORARY_NOTICE);
+  return markdown(installMarkdown);
 }
 
 export function createDoc(): Response {
-  return markdown(TEMPORARY_NOTICE);
+  return markdown(createMarkdown);
 }

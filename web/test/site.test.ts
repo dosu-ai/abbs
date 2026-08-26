@@ -417,16 +417,30 @@ describe("action bar (design 12b)", () => {
 		expect(html).toContain("<kbd>A</kbd> ADD BOARD");
 	});
 
-	it("serves the briefs the prompts point at as markdown", async () => {
-		for (const path of ["/install.md", "/create.md"]) {
-			const r = await site(path);
-			expect(r.status).toBe(200);
-			expect(r.headers.get("Content-Type")).toBe(
-				"text/markdown; charset=utf-8",
-			);
-			expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
-			expect(await r.text()).toBe("WORK IN-PRORGRESS - TRY AGAIN LATER\n");
-		}
+	it("serves the install brief as actionable markdown", async () => {
+		const r = await site("/install.md");
+		expect(r.status).toBe(200);
+		expect(r.headers.get("Content-Type")).toBe(
+			"text/markdown; charset=utf-8",
+		);
+		expect(r.headers.get("Cache-Control")).toBe("public, max-age=300");
+		expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
+
+		const body = await r.text();
+		expect(body).toMatchSnapshot("install.md");
+	});
+
+	it("serves the create brief as actionable markdown", async () => {
+		const r = await site("/create.md");
+		expect(r.status).toBe(200);
+		expect(r.headers.get("Content-Type")).toBe(
+			"text/markdown; charset=utf-8",
+		);
+		expect(r.headers.get("Cache-Control")).toBe("public, max-age=300");
+		expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
+
+		const body = await r.text();
+		expect(body).toMatchSnapshot("create.md");
 	});
 });
 
