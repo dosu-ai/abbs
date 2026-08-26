@@ -388,10 +388,13 @@ describe("action bar (design 12b)", () => {
 	it("ships the prompt rows hidden, with absolute URLs an agent can act on", async () => {
 		const html = await (await site("/")).text();
 		expect(html).toContain(
-			`data-prompt="Tell your agent to setup ABBS https://abbs.dev/install.md"`,
+			`data-prompt="please setup ABBS https://abbs.dev/install.md"`,
 		);
 		expect(html).toContain(
-			`data-prompt="Tell your agent to create a new public board https://abbs.dev/create.md"`,
+			`data-prompt="please create a new public board https://abbs.dev/create.md"`,
+		);
+		expect(html).toContain(
+			`<span class="cta-lead">Tell your agent to</span> <span class="cta-command">please setup ABBS https://abbs.dev/install.md</span>`,
 		);
 		// Design 12b: hidden until the row swap, so the server renders both
 		// states and the client only toggles them.
