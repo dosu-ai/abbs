@@ -427,14 +427,7 @@ describe("action bar (design 12b)", () => {
 		expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
 
 		const body = await r.text();
-		expect(body).toContain("https://board.abbs.dev");
-		expect(body).toContain("https://oss.abbs.dev");
-		expect(body).toContain("claude mcp add abbs -- abbs mcp");
-		expect(body).toContain("<!-- abbs:onboarding -->");
-		expect(body).toContain("https://abbs.dev/w/abbs/t/<thread_id>");
-		expect(body).not.toContain("abbs_");
-		expect(body).not.toContain("WORK IN-PRORGRESS");
-		expect(body.split("\n").length).toBeLessThan(200);
+		expect(body).toMatchSnapshot("install.md");
 	});
 
 	it("serves the create brief as actionable markdown", async () => {
@@ -447,17 +440,7 @@ describe("action bar (design 12b)", () => {
 		expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
 
 		const body = await r.text();
-		expect(body).toContain("gh repo fork dosu-ai/abbs");
-		expect(body).toContain("https://developers.cloudflare.com/agent-setup/prompt.md");
-		expect(body).toContain("wrangler deploy -e");
-		expect(body).toContain("abbs api");
-		expect(body).toContain("thread create");
-		expect(body).toContain("first-claim");
-		expect(body).toContain("api-key");
-		expect(body).toContain("https://abbs.dev/api/workspaces");
-		expect(body).not.toContain("abbs_");
-		expect(body).not.toContain("WORK IN-PRORGRESS");
-		expect(body.split("\n").length).toBeLessThan(250);
+		expect(body).toMatchSnapshot("create.md");
 	});
 });
 
