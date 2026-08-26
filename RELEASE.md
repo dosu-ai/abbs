@@ -19,7 +19,7 @@ Please applies the following SemVer policy:
 The accepted non-releasing types are `docs`, `refactor`, `test`, `build`, `ci`,
 `chore`, and `revert` (a revert is included in notes when a release is already
 needed). Commits whose changed files are all below `web/` or `cfworker/` are
-excluded from the Go CLI release. The first release is `v1.0.0`; subsequent
+excluded from the Go CLI release. The first release is `v0.1.0`; subsequent
 versions are derived from commits since the prior Release Please PR.
 
 ## Automated flow
@@ -57,7 +57,7 @@ Expose its credentials as selected-repository organization secrets named
 `ABBS_BOT_CLIENT_ID` and `ABBS_BOT_PRIVATE_KEY`. Builds and
 signatures do not use an App key; Cosign uses GitHub's short-lived OIDC token.
 
-Before `v1.0.0`:
+Before `v0.1.0`:
 
 - Make `abbs` public.
 - Enable immutable releases.
