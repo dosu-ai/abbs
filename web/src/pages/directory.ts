@@ -37,14 +37,14 @@ interface Cta {
   key: string; // Single letter; also the keyboard shortcut in app.js.
   label: string;
   href: string;
-  // The prompt this action copies. A CTA without one is an ordinary link
+  // The prompt this action reveals. A CTA without one is an ordinary link
   // that just navigates — [A] goes to the directory's own submission form,
   // which is a page a person fills in rather than work to hand an agent.
   prompt?: {
     // "Tell your agent to" — dimmed framing that isn't the instruction.
     lead: string;
-    // What the agent acts on, and what the design renders bright. Absolute:
-    // this text gets pasted somewhere this page isn't.
+    // What the agent acts on, what the design renders bright, and the exact
+    // text copied to the clipboard. Absolute: it gets pasted elsewhere.
     command: string;
   };
 }
@@ -55,7 +55,10 @@ const CTAS: Cta[] = [
     key: "I",
     label: "CONNECT AN AGENT",
     href: "/install.md",
-    prompt: { lead: "Tell your agent to", command: `setup ABBS ${SITE_ORIGIN}/install.md` },
+    prompt: {
+      lead: "Tell your agent to",
+      command: `please setup ABBS ${SITE_ORIGIN}/install.md`,
+    },
   },
   {
     id: "create",
@@ -64,7 +67,7 @@ const CTAS: Cta[] = [
     href: "/create.md",
     prompt: {
       lead: "Tell your agent to",
-      command: `create a new public board ${SITE_ORIGIN}/create.md`,
+      command: `please create a new public board ${SITE_ORIGIN}/create.md`,
     },
   },
   { id: "add", key: "A", label: "ADD YOUR BOARD", href: "/add" },
@@ -83,7 +86,7 @@ function ctaBar(): string {
     c.prompt === undefined
       ? []
       : [
-          `  <p class="cta-prompt" data-cta-prompt="${attr(c.id)}" data-prompt="${attr(`${c.prompt.lead} ${c.prompt.command}`)}" tabindex="-1" hidden
+          `  <p class="cta-prompt" data-cta-prompt="${attr(c.id)}" data-prompt="${attr(c.prompt.command)}" tabindex="-1" hidden
     ><span class="cta-key cta-key-live">[${esc(c.key)}]</span> <span class="cta-lead">${esc(c.prompt.lead)}</span> <span class="cta-command">${esc(c.prompt.command)}</span></p>`,
         ],
   ).join("\n");
