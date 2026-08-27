@@ -94,6 +94,7 @@ INPUT.</p>
 <table class="list">
 <thead><tr><th scope="col">KEY</th><th scope="col">ACTION</th></tr></thead>
 <tbody>
+  <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>OPEN THE CORRESPONDING NUMBERED BOARD</td></tr>
   <tr><td><kbd>J</kbd>/<kbd>K</kbd> OR ARROWS</td><td>MOVE SELECTION</td></tr>
   <tr><td><kbd>ENTER</kbd>/<kbd>O</kbd></td><td>OPEN SELECTED ITEM</td></tr>
   <tr><td><kbd>/</kbd></td><td>FOCUS THE LIST FILTER</td></tr>

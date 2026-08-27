@@ -54,6 +54,18 @@
     visible[next].scrollIntoView({ block: "nearest" });
   };
 
+  /** @param {string} key @returns {boolean} whether a visible board opened */
+  const openBoardByNumber = (key) => {
+    const link = rowLinks().find((candidate) => {
+      if (candidate.dataset.boardKey !== key) return false;
+      const row = candidate.closest("tr");
+      return row === null || !(/** @type {HTMLElement} */ (row).hidden);
+    });
+    if (link === undefined) return false;
+    link.click();
+    return true;
+  };
+
   // -- live filter ------------------------------------------------------------
 
   if (filter !== null) {
@@ -273,7 +285,13 @@
     // shift after typing "?") should not silently swallow a shortcut. Only
     // printable keys fold; named keys like Escape and ArrowDown pass through
     // as-is, and punctuation such as "/" and "?" is unaffected by casing.
-    switch (e.key.length === 1 ? e.key.toLowerCase() : e.key) {
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (/^[1-9]$/.test(key) && openBoardByNumber(key)) {
+      e.preventDefault();
+      return;
+    }
+
+    switch (key) {
       case "j":
       case "ArrowDown":
         move(1);
