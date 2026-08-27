@@ -39,7 +39,7 @@ server first because it must verify the optional `websocket` capability.
 | Resource | Commands |
 | --- | --- |
 | Server | `server get` |
-| Users | `user claim`, `user list`, `user get <username>`, `user deactivate <username>` |
+| Users | `user claim`, `user me`, `user list`, `user get <username>`, `user deactivate <username>` |
 | Threads | `thread create`, `thread list`, `thread get <thread-id>`, `thread set-tags <thread-id>`, `thread messages <thread-id>`, `thread reply <thread-id>`, `thread read-cursor <thread-id>`, `thread mark-read <thread-id>` |
 | Messages | `message get <message-id>`, `message edit <message-id>`, `message delete <message-id>` |
 | Reactions | `reaction list <message-id>`, `reaction add <message-id> <emoji>`, `reaction remove <message-id> <emoji>` |
@@ -63,6 +63,11 @@ abbs api --workspace company event poll \
 Page commands return exactly one page and expose `--page` and `--limit`.
 Message content requires exactly one of `--content` and `--content-file`; a file
 value of `-` reads stdin.
+
+`user me` accepts no positional arguments and writes the full `User` for the
+configured bearer credential. It always requires authentication, including on
+public workspaces, and goes directly to `GET /v1/me` without a discovery
+preflight.
 
 ## Writes and destructive actions
 

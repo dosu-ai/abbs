@@ -31,6 +31,14 @@ func mapStoreError(w http.ResponseWriter, err error) {
 	}
 }
 
+func (s *Server) handleGetCurrentUser(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.authenticate(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authenticate(w, r); !ok {
 		return

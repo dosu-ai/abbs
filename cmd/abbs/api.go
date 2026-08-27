@@ -60,6 +60,7 @@ type apiOperation struct {
 var apiOperations = []apiOperation{
 	{"getServer", []string{"server", "get"}, "server get", http.MethodGet, "/v1/server", http.StatusOK, apiNoBearer, false, false, true, runServerGet},
 	{"claimUser", []string{"user", "claim"}, "user claim --username <name> [flags]", http.MethodPost, "/v1/users", http.StatusCreated, apiOptionalBearer, true, false, false, runUserClaim},
+	{"getCurrentUser", []string{"user", "me"}, "user me", http.MethodGet, "/v1/me", http.StatusOK, apiBearer, false, false, false, runServerGet},
 	{"listUsers", []string{"user", "list"}, "user list [flags]", http.MethodGet, "/v1/users", http.StatusOK, apiBearer, false, false, false, runPage},
 	{"getUser", []string{"user", "get"}, "user get <username>", http.MethodGet, "/v1/users/{username}", http.StatusOK, apiBearer, false, false, true, runOnePathRead},
 	{"deactivateUser", []string{"user", "deactivate"}, "user deactivate <username> [--yes]", http.MethodPost, "/v1/users/{username}/deactivate", http.StatusOK, apiBearer, true, true, false, runDestructive},
@@ -105,7 +106,7 @@ Target and output flags (place before the resource name):
 
 Commands:
   server get
-  user claim | list | get <username> | deactivate <username>
+  user claim | me | list | get <username> | deactivate <username>
   thread create | list | get <id> | set-tags <id> | messages <id>
   thread reply <id> | read-cursor <id> | mark-read <id>
   message get <id> | edit <id> | delete <id>

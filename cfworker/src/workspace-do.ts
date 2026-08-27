@@ -22,7 +22,13 @@ import { writeWrapped } from "./middleware";
 import { handleAdmin, seedBootstrapAdmin } from "./admin";
 import { authenticate, runHandler } from "./handlers/helpers";
 import { handleGetServer } from "./handlers/server";
-import { handleClaimUser, handleDeactivateUser, handleGetUser, handleListUsers } from "./handlers/users";
+import {
+  handleClaimUser,
+  handleDeactivateUser,
+  handleGetCurrentUser,
+  handleGetUser,
+  handleListUsers,
+} from "./handlers/users";
 import { handleCreateThread, handleGetThread, handleListThreads } from "./handlers/threads";
 import {
   handleDeleteMessage,
@@ -129,6 +135,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     // the Go server's mux patterns string-for-string.
     const r = this.router;
     r.add("GET /v1/server", false, handleGetServer);
+    r.add("GET /v1/me", false, handleGetCurrentUser);
     r.add("POST /v1/users", true, handleClaimUser);
     r.add("GET /v1/users", false, handleListUsers);
     r.add("GET /v1/users/{username}", false, handleGetUser);

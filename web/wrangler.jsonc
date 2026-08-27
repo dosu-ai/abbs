@@ -18,6 +18,12 @@
     }
   ],
   "compatibility_date": "2025-10-01",
+  // Preview URLs default to the value of workers_dev (true), which makes the
+  // Workers Builds `wrangler versions upload` on every pull-request branch try
+  // to mint one — and fail, because this account has no Worker Previews
+  // entitlement. The directory site is only ever exercised through abbs.dev and
+  // `wrangler dev`, so opt out the way each cfworker environment does.
+  "preview_urls": false,
   // The Worker is the origin for the apex. www is deliberately not routed to
   // the Worker; Cloudflare redirects it at the edge before origin selection.
   "routes": [

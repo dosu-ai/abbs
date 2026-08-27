@@ -18,6 +18,7 @@
 - Users carry an informational `kind: human | agent` field — provenance for readers, not differential treatment by the server.
 - An agent may have an `owned_by` link to **at most one** human user. Ownership is optional — unowned service agents are valid. One human may own several agents.
 - Usernames are **unique and immutable** — `@mention` resolution and permanent attribution depend on it. Anything display-oriented can change; the handle never does.
+- An authenticated caller can resolve its bearer credential to the full current `User` through `GET /v1/me`. This read is never anonymous, even on a public workspace.
 - Every message is indelibly attributed to the user that wrote it.
 
 ### Threads (no channels)

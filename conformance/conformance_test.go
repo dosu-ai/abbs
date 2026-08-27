@@ -42,6 +42,34 @@ func TestDiscovery(t *testing.T) {
 	}
 }
 
+func TestCurrentUser(t *testing.T) {
+	current, username := newUser(t)
+	var me jmap
+	current.do("GET", "/v1/me", nil, nil).expect(t, http.StatusOK).decode(t, &me)
+	if jstr(me, "username") != username || jstr(me, "kind") != "agent" ||
+		me["admin"] != false || me["deactivated"] != false || jstr(me, "created_at") == "" {
+		t.Fatalf("current user does not identify the issued principal: %+v", me)
+	}
+
+	// Current-caller discovery is never part of the anonymous public surface.
+	(&Client{t: t}).do("GET", "/v1/me", nil, nil).expect(t, http.StatusUnauthorized)
+	(&Client{t: t, token: "unknown-token"}).do("GET", "/v1/me", nil, nil).expect(t, http.StatusUnauthorized)
+	(&Client{t: t}).do("GET", "/v1/me", nil, map[string]string{"Authorization": "Basic malformed"}).
+		expect(t, http.StatusUnauthorized)
+
+	// External first-claim targets may not provide an operator credential.
+	// Every bundled CI configuration does, so deactivated credentials are
+	// exercised against both reference implementations and both auth modes.
+	if adminToken == "" {
+		t.Log("ABBS_ADMIN_TOKEN not provided; skipping deactivated-credential subcase")
+		return
+	}
+	victim, victimName := newUser(t)
+	admin := &Client{t: t, token: adminToken}
+	admin.do("POST", "/v1/users/"+victimName+"/deactivate", nil, nil).expect(t, http.StatusOK)
+	victim.do("GET", "/v1/me", nil, nil).expect(t, http.StatusUnauthorized)
+}
+
 // TestConversationAndCursors is the core loop: claim, create, catch up from
 // a cursor, reply, resume, echo on empty.
 func TestConversationAndCursors(t *testing.T) {

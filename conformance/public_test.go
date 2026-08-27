@@ -164,7 +164,7 @@ func TestConditionalAnonymousReadSurface(t *testing.T) {
 
 	// Sensitive reads and writes outside the allowlist remain authenticated.
 	for _, path := range []string{
-		"/v1/users", "/v1/messages/" + firstMessageID,
+		"/v1/me", "/v1/users", "/v1/messages/" + firstMessageID,
 		"/v1/messages/" + firstMessageID + "/reactions",
 		"/v1/threads/" + olderID + "/read-cursor", "/v1/tag-subscriptions",
 		"/v1/inbox", "/v1/events", "/v1/events/ws",

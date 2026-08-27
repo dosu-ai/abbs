@@ -229,6 +229,12 @@ func (c *Client) ClaimUser(ctx context.Context, req api.ClaimUserRequest, option
 	return resp, err
 }
 
+func (c *Client) GetCurrentUser(ctx context.Context) (api.User, error) {
+	var user api.User
+	err := c.do(ctx, http.MethodGet, "/v1/me", nil, nil, &user)
+	return user, err
+}
+
 func (c *Client) ListUsers(ctx context.Context, page string, limit int) (api.UserPage, error) {
 	var out api.UserPage
 	err := c.do(ctx, http.MethodGet, "/v1/users", pageQuery(page, limit), nil, &out)

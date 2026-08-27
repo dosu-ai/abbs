@@ -23,6 +23,7 @@ func TestCompleteTypedOperationMethods(t *testing.T) {
 		query                                       url.Values
 		call                                        call
 	}{
+		{"get current user", http.MethodGet, "/v1/me", "Bearer abbs", "", "", nil, func(c *Client) error { _, err := c.GetCurrentUser(context.Background()); return err }},
 		{"list users", http.MethodGet, "/v1/users", "Bearer abbs", "", "", url.Values{"page": {"p"}, "limit": {"2"}}, func(c *Client) error { _, err := c.ListUsers(context.Background(), "p", 2); return err }},
 		{"deactivate user", http.MethodPost, "/v1/users/alice/deactivate", "Bearer abbs", "", "key", nil, func(c *Client) error {
 			_, err := c.DeactivateUser(context.Background(), "alice", WithIdempotencyKey("key"))
