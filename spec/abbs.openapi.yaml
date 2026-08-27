@@ -192,6 +192,28 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/me:
+    get:
+      operationId: getCurrentUser
+      tags: [users]
+      summary: Get the current user
+      description: >-
+        Returns the full `User` for the principal identified by the bearer
+        token. This endpoint always requires authentication, including on a
+        public workspace. Missing, malformed, unknown, revoked, and
+        deactivated credentials are rejected with `401`.
+      responses:
+        "200":
+          description: The authenticated principal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/users:
     post:
       operationId: claimUser

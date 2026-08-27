@@ -220,16 +220,16 @@ type serverProc struct {
 	db         string
 	bin        string
 	cmd        *exec.Cmd
-	adminToken string // set in api-key mode
+	adminToken string // operator-created admin credential in every owned mode
 }
 
-// launchServer boots the server in the suite's auth mode. In api-key mode it
-// first bootstraps an admin against a fresh database via the operator CLI —
-// the same ceremony a real deployment uses — and carries the key on the
-// proc. A restart on an existing database keeps the original admin.
+// launchServer boots the server in the suite's auth mode. It first bootstraps
+// an admin against a fresh database via the operator CLI so admin-only
+// conformance cases run in every auth mode. A restart on an existing database
+// keeps the original admin.
 func launchServer(bin, addr, db string) (*serverProc, error) {
 	var admin string
-	if _, err := os.Stat(db); authMode == "api-key" && os.IsNotExist(err) {
+	if _, err := os.Stat(db); os.IsNotExist(err) {
 		out, err := exec.Command(bin, "admin", "create-user", "-db", db, "-kind", "human", "-admin", randName("cfadmin")).Output()
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap admin: %v", err)

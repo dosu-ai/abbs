@@ -64,8 +64,8 @@ func TestAPIOperationRegistryMatchesOpenAPI(t *testing.T) {
 	if !reflect.DeepEqual(registryIDs, specIDs) {
 		t.Fatalf("registry IDs do not match spec\nregistry: %v\nspec: %v", registryIDs, specIDs)
 	}
-	if len(registryIDs) != 31 {
-		t.Fatalf("got %d operations, want 31", len(registryIDs))
+	if len(registryIDs) != 32 {
+		t.Fatalf("got %d operations, want 32", len(registryIDs))
 	}
 }
 
@@ -90,6 +90,7 @@ func TestAPICommandRequestShapes(t *testing.T) {
 	tests := []commandShape{
 		{"getServer", []string{"server", "get"}, http.MethodGet, "/v1/server", nil, "", "", false, false},
 		{"claimUser", []string{"user", "claim", "--username", "alice", "--kind", "human", "--display-name", "Alice", "--idempotency-key", "fixed"}, http.MethodPost, "/v1/users", nil, `{"username":"alice","kind":"human","display_name":"Alice"}`, "Bearer abbs-secret", true, false},
+		{"getCurrentUser", []string{"user", "me"}, http.MethodGet, "/v1/me", nil, "", "Bearer abbs-secret", false, false},
 		{"listUsers", []string{"user", "list", "--page", "p1", "--limit", "2"}, http.MethodGet, "/v1/users", url.Values{"page": {"p1"}, "limit": {"2"}}, "", "Bearer abbs-secret", false, false},
 		{"getUser", []string{"user", "get", "alice"}, http.MethodGet, "/v1/users/alice", nil, "", "Bearer abbs-secret", false, false},
 		{"deactivateUser", []string{"user", "deactivate", "alice", "--yes", "--idempotency-key", "fixed"}, http.MethodPost, "/v1/users/alice/deactivate", nil, "", "Bearer abbs-secret", true, false},
@@ -245,7 +246,7 @@ func TestAPIRoutineAuthenticatedCommandSkipsDiscovery(t *testing.T) {
 	defer srv.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := runAPIContext(context.Background(), []string{"--url", srv.URL, "user", "list"}, strings.NewReader(""), &stdout, &stderr)
+	code := runAPIContext(context.Background(), []string{"--url", srv.URL, "user", "me"}, strings.NewReader(""), &stdout, &stderr)
 	if code != apiOK || discoveryCalls.Load() != 0 || targetCalls.Load() != 1 {
 		t.Fatalf("exit=%d discovery=%d target=%d stdout=%q stderr=%q", code, discoveryCalls.Load(), targetCalls.Load(), stdout.String(), stderr.String())
 	}
@@ -418,12 +419,14 @@ func TestAPIDestructiveNonInteractiveRequiresYes(t *testing.T) {
 func TestAPILocalValidationUsesUsageExit(t *testing.T) {
 	tests := [][]string{
 		{"--url", "http://127.0.0.1:1", "user", "list", "--limit", "0"},
+		{"--url", "http://127.0.0.1:1", "user", "me", "extra"},
 		{"--url", "http://127.0.0.1:1", "event", "poll", "--timeout", "61"},
 		{"--url", "http://127.0.0.1:1", "event", "stream", "--max-events", "0"},
 		{"--url", "http://127.0.0.1:1", "thread", "create", "--title", "x", "--content", "a", "--content-file", "b"},
 		{"--url", "http://127.0.0.1:1", "thread", "mark-read", "id"},
 		{"--url", "http://127.0.0.1:1", "message", "delete", "id"},
 		{"--url", "http://127.0.0.1:1", "--anonymous", "user", "list"},
+		{"--url", "http://127.0.0.1:1", "--anonymous", "user", "me"},
 	}
 	for _, args := range tests {
 		var stdout, stderr bytes.Buffer
@@ -526,6 +529,7 @@ func TestAPILiveLifecycleAllImplementedOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 	run("", "user", "claim", "--username", "bob", "--kind", "agent")
+	run("", "user", "me")
 	run("", "user", "list", "--limit", "10")
 	run("", "user", "get", "alice")
 

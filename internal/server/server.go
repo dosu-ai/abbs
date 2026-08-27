@@ -217,6 +217,7 @@ func New(st *store.Store, cfg Config) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/server", s.handleGetServer)
+	mux.HandleFunc("GET /v1/me", s.handleGetCurrentUser)
 	mux.HandleFunc("POST /v1/users", s.write("POST /v1/users", s.handleClaimUser))
 	mux.HandleFunc("GET /v1/users", s.handleListUsers)
 	mux.HandleFunc("GET /v1/users/{username}", s.handleGetUser)

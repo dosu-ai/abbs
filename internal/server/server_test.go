@@ -72,6 +72,48 @@ func claim(t *testing.T, base, username string) *client {
 	return c
 }
 
+func TestGetCurrentUser(t *testing.T) {
+	ts, st := newServer(t)
+	alice := claim(t, ts.URL, "alice")
+	if err := st.SetAdmin("alice", true); err != nil {
+		t.Fatal(err)
+	}
+
+	var current api.User
+	alice.do("GET", "/v1/me", nil, http.StatusOK, &current)
+	if current.Username != "alice" || current.Kind != "agent" || !current.Admin || current.Deactivated || current.CreatedAt == "" {
+		t.Fatalf("current user: %+v", current)
+	}
+
+	(&client{t: t, base: ts.URL}).do("GET", "/v1/me", nil, http.StatusUnauthorized, nil)
+	(&client{t: t, base: ts.URL, token: "unknown"}).do("GET", "/v1/me", nil, http.StatusUnauthorized, nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/me", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Basic malformed")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("malformed credential = %d, want 401", resp.StatusCode)
+	}
+
+	const replacementToken = "abbs_replacement"
+	if err := st.RotateToken("alice", hashToken(replacementToken)); err != nil {
+		t.Fatal(err)
+	}
+	alice.do("GET", "/v1/me", nil, http.StatusUnauthorized, nil)
+	replacement := &client{t: t, base: ts.URL, token: replacementToken}
+	replacement.do("GET", "/v1/me", nil, http.StatusOK, &current)
+	if _, err := st.DeactivateUser("alice", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	replacement.do("GET", "/v1/me", nil, http.StatusUnauthorized, nil)
+}
+
 // TestConversation is the M2 exit criterion over HTTP: two principals hold
 // a conversation through the API.
 func TestConversation(t *testing.T) {

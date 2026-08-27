@@ -75,6 +75,9 @@ jobs:
         run: |
           # Distinct inspector ports: parallel wrangler dev instances cannot
           # share the default 9229 port.
+          OPERATOR_TOKEN="operator_ci_$(openssl rand -hex 24)"
+          printf 'OPERATOR_TOKEN=%s\n' "$OPERATOR_TOKEN" > .dev.vars
+          printf 'OPERATOR_TOKEN=%s\n' "$OPERATOR_TOKEN" > .dev.vars.public
           pnpm exec wrangler dev --port 8787 --inspector-port 9229 --persist-to "$(mktemp -d)" >/tmp/wrangler-first-claim.log 2>&1 &
           ADMIN_TOKEN="abbs_ci_$(openssl rand -hex 24)"
           echo "ABBS_ADMIN_TOKEN=$ADMIN_TOKEN" >> "$GITHUB_ENV"
@@ -91,15 +94,25 @@ jobs:
           curl -sf http://127.0.0.1:8788/v1/server | grep -q api-key
           curl -sf http://127.0.0.1:8789/v1/server | grep -q '"visibility":"public"'
           curl -sf http://127.0.0.1:8790/v1/server | grep -q '"visibility":"public"'
+          FIRST_CLAIM_ADMIN_TOKEN=$(curl -sf -X POST http://127.0.0.1:8787/admin/users \
+            -H "Authorization: Bearer $OPERATOR_TOKEN" -H 'Content-Type: application/json' \
+            --data '{"username":"admin","kind":"human","admin":true}' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          PUBLIC_FIRST_CLAIM_ADMIN_TOKEN=$(curl -sf -X POST http://127.0.0.1:8789/admin/users \
+            -H "Authorization: Bearer $OPERATOR_TOKEN" -H 'Content-Type: application/json' \
+            --data '{"username":"admin","kind":"human","admin":true}' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          echo "FIRST_CLAIM_ADMIN_TOKEN=$FIRST_CLAIM_ADMIN_TOKEN" >> "$GITHUB_ENV"
+          echo "PUBLIC_FIRST_CLAIM_ADMIN_TOKEN=$PUBLIC_FIRST_CLAIM_ADMIN_TOKEN" >> "$GITHUB_ENV"
       - name: conformance suite, first-claim configuration
         working-directory: conformance
-        run: ABBS_BASE_URL=http://127.0.0.1:8787 go test -count=1 -shuffle=on ./...
+        run: ABBS_BASE_URL=http://127.0.0.1:8787 ABBS_ADMIN_TOKEN="$FIRST_CLAIM_ADMIN_TOKEN" go test -count=1 -shuffle=on ./...
       - name: conformance suite, api-key configuration
         working-directory: conformance
         run: ABBS_BASE_URL=http://127.0.0.1:8788 go test -count=1 -shuffle=on ./...
       - name: conformance suite, public first-claim configuration
         working-directory: conformance
-        run: ABBS_BASE_URL=http://127.0.0.1:8789 ABBS_VISIBILITY=public go test -count=1 -shuffle=on ./...
+        run: ABBS_BASE_URL=http://127.0.0.1:8789 ABBS_VISIBILITY=public ABBS_ADMIN_TOKEN="$PUBLIC_FIRST_CLAIM_ADMIN_TOKEN" go test -count=1 -shuffle=on ./...
       - name: conformance suite, public api-key configuration
         working-directory: conformance
         run: ABBS_BASE_URL=http://127.0.0.1:8790 ABBS_VISIBILITY=public ABBS_ADMIN_TOKEN="$ABBS_ADMIN_TOKEN" go test -count=1 -shuffle=on ./...

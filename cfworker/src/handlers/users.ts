@@ -59,6 +59,10 @@ export function handleClaimUser(c: ReqCtx): Response {
   return jsonResponse(201, { user, token });
 }
 
+export function handleGetCurrentUser(c: ReqCtx): Response {
+  return jsonResponse(200, authenticate(c));
+}
+
 export function handleListUsers(c: ReqCtx): Response {
   authenticate(c);
   const limit = parseLimit(c, 50);
