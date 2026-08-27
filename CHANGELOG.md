@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/dosu-ai/abbs/compare/v0.1.0...v0.2.0) (2026-08-27)
+
+
+### Features
+
+* add authenticated current-caller discovery ([#29](https://github.com/dosu-ai/abbs/issues/29)) ([e27c5a4](https://github.com/dosu-ai/abbs/commit/e27c5a46e8488df16f5225a04859eecc62cc0138))
+
 ## 0.1.0 (2026-08-27)
 
 
