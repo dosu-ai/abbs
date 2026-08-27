@@ -50,7 +50,11 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
-          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INPUT_TAG" --jq .draft)" = true
+          mapfile -t release_ids < <(
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == env.INPUT_TAG and .draft == true) | .id'
+          )
+          test "${#release_ids[@]}" -eq 1
           echo "release_created=true" >> "$GITHUB_OUTPUT"
           echo "tag_name=$INPUT_TAG" >> "$GITHUB_OUTPUT"
 
@@ -158,12 +162,18 @@ jobs:
           name: abbs-${{ needs.release-please.outputs.tag_name }}
           path: dist
       - name: verify the draft contains exactly the tested assets
+        id: draft
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
-          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG_NAME" --jq .draft)" = true
+          mapfile -t release_ids < <(
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == env.TAG_NAME and .draft == true) | .id'
+          )
+          test "${#release_ids[@]}" -eq 1
+          release_id=${release_ids[0]}
           find dist -maxdepth 1 -type f \( \
             -name 'abbs_*.tar.gz' -o -name 'abbs_*.zip' -o \
             -name 'abbs_*.sbom.json' -o -name 'checksums.txt' -o \
@@ -171,8 +181,10 @@ jobs:
           \) -exec basename {} \; | sort -u > /tmp/expected-assets
           printf '%s\n' install.ps1 install.sh >> /tmp/expected-assets
           sort -u -o /tmp/expected-assets /tmp/expected-assets
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG_NAME" --jq '.assets[].name' | sort -u > /tmp/actual-assets
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
+            --jq '.[].name' | sort -u > /tmp/actual-assets
           diff -u /tmp/expected-assets /tmp/actual-assets
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
       - name: attest the checksum manifest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -180,8 +192,7 @@ jobs:
       - name: publish and freeze the tested draft
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         run: |
-          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG_NAME" --jq .id)
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
             -F draft=false -f make_latest=true >/dev/null
