@@ -534,11 +534,19 @@ table.list .dim {
   color: #777;
 }
 
-/* A tag and its count wrap as one token — never "[open-" / "source 2]". */
+/* A tag and its count wrap as one token — never "[open-" / "source 2]".
+   Tags may run to 64 characters, wider than a phone, so an unbreakable one
+   is clipped with an ellipsis inside the row instead of scrolling the page
+   sideways. */
 .tag-row a {
   color: #aaa;
   text-decoration: none;
+  display: inline-block;
+  max-width: 100%;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
 }
 
 .tag-row a:hover,
