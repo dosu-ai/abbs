@@ -57,20 +57,23 @@ Expose its credentials as selected-repository organization secrets named
 `ABBS_BOT_CLIENT_ID` and `ABBS_BOT_PRIVATE_KEY`. Builds and
 signatures do not use an App key; Cosign uses GitHub's short-lived OIDC token.
 
-Before `v0.1.0`:
+Before the first GitHub release:
 
 - Make `abbs` public.
 - Enable immutable releases.
 - Protect `main` and require pull requests, the conventional-title check,
   current `ci` jobs, and every `release checks` job.
 - Configure squash merging so the pull request title becomes the commit title.
+- Run `release checks` manually once and confirm all four native runners are
+  available to the repository.
+
+Before enabling Homebrew distribution:
+
 - Protect `homebrew-dosu/main`; require its tap syntax and install/test matrix.
 - Configure the tap's `repository_dispatch` receiver for event
   `abbs-release`. The payload contains `tag`, `version`, `release_url`, and
   `checksums_url`. It must update only `Formula/abbs.rb`, open a bot PR, enable
   auto-merge, and rely on the protected tap checks.
-- Run `release checks` manually once and confirm all four native runners are
-  available to the repository.
 
 `ABBS_DOWNLOAD_BASE` exists only for installer tests and controlled HTTPS
 mirrors. Production instructions should use the GitHub release URL.
@@ -82,6 +85,11 @@ problem on a pull request and rerun the failed release workflow; GoReleaser
 replaces matching draft assets idempotently. If a new workflow run is needed,
 dispatch `release` manually with the existing draft tag. The workflow refuses
 tags that are not still drafts. Do not publish a partial draft.
+
+Draft releases whose tags were force-created do not resolve through GitHub's
+release-by-tag endpoint until publication. Recovery and publication therefore
+find exactly one matching draft in the release list and carry its numeric
+release ID through the remaining steps.
 
 Once a release is published it is frozen. Never move or reuse its tag and never
 replace its assets. Ship regressions as a new patch release. Native Apple
