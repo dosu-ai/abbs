@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["public/app.js"]
+  "include": ["public/app.js", "public/localtime.js"]
 }

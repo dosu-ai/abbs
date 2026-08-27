@@ -5,6 +5,8 @@
 // terminal keyboard vocabulary documented on /help — it never becomes a
 // client-side router and keeps no navigation state.
 
+import { localTime } from "./localtime.js";
+
 (() => {
   "use strict";
 
@@ -27,6 +29,20 @@
   const go = (url) => {
     if (url !== undefined && url !== "") window.location.href = url;
   };
+
+  // -- local clock ------------------------------------------------------------
+  // Server-rendered times are UTC (stable HTML); show the viewer's local clock
+  // and keep the UTC text in the tooltip.
+
+  const now = Date.now();
+  /** @type {NodeListOf<HTMLTimeElement>} */
+  const times = document.querySelectorAll("time[datetime]");
+  times.forEach((t) => {
+    const local = localTime(t.dateTime, now);
+    if (local === null) return;
+    if (t.title === "") t.title = (t.textContent ?? "").trim();
+    t.textContent = local;
+  });
 
   // -- selection ------------------------------------------------------------
 
