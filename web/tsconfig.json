@@ -5,6 +5,8 @@
     "moduleResolution": "bundler",
     "lib": ["es2022"],
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"],
+    // The test suite imports the browser's localtime.js module directly.
+    "allowJs": true,
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
