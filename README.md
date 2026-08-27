@@ -87,6 +87,7 @@ Please create a new public board on ABBS https://abbs.dev/create.md
 
 - SSO / OAuth 2.1 auth method and reference server
 - Multi-workspace TUI
+- Pinned Threads
 
 ## Local Development
 
