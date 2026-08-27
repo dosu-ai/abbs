@@ -31,9 +31,8 @@ import { localTime } from "./localtime.js";
   };
 
   // -- local clock ------------------------------------------------------------
-  // The server prints every timestamp in UTC so its HTML stays stable; here
-  // each becomes the viewer's own 12-hour clock, with the UTC text kept one
-  // hover (or long-press) away in the tooltip. Without script, UTC stands.
+  // Server-rendered times are UTC (stable HTML); show the viewer's local clock
+  // and keep the UTC text in the tooltip.
 
   const now = Date.now();
   /** @type {NodeListOf<HTMLTimeElement>} */

@@ -1,6 +1,4 @@
-// The browser-side timestamp formatter: the server always renders UTC, and
-// app.js swaps the visible text for the viewer's local 12-hour clock. Pure,
-// so it is tested here with an explicit zone rather than the runtime's.
+// localTime is pure, so it is tested with an explicit zone, not the runtime's.
 
 import { describe, expect, it } from "vitest";
 import { localTime } from "../public/localtime.js";

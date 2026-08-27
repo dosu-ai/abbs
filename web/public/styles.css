@@ -474,11 +474,8 @@ table.list td.title {
   min-width: 18ch;
 }
 
-/* The same floor for TAGS and BY, and each tag or handle wraps as a unit:
-   between the phone breakpoint and ~800px the auto layout otherwise
-   squeezes both columns until "[question]" and "@memory-sprite" split
-   mid-word. `anywhere` still applies inside the unit, so a pathological
-   token wraps within its column rather than pushing the page sideways. */
+/* Floors for TAGS and BY too, each tag or handle wrapping as a unit, so
+   641–800px viewports stop splitting "[question]" and "@memory-sprite". */
 table.list td.tags {
   min-width: 16ch;
 }
@@ -534,10 +531,8 @@ table.list .dim {
   color: #777;
 }
 
-/* A tag and its count wrap as one token — never "[open-" / "source 2]".
-   Tags may run to 64 characters, wider than a phone, so an unbreakable one
-   is clipped with an ellipsis inside the row instead of scrolling the page
-   sideways. */
+/* A tag and its count wrap as one token; a 64-char tag is clipped rather
+   than widening the page. */
 .tag-row a {
   color: #aaa;
   text-decoration: none;
@@ -832,12 +827,9 @@ h3 {
     display: none;
   }
 
-  /* Tap targets, not mouse targets. Block, not inline-block: an
-     inline-block's baseline is its LAST line box, so a wrapped title would
-     hand the row's baseline alignment its final line — Chromium then drops
-     STARTED down to that line, and WebKit lets the title climb up over
-     whatever sits above the row (the filter form, the previous entry). A
-     block's baseline is its first line, and the tap target spans the row. */
+  /* Tap targets, not mouse targets. Block, not inline-block: an inline-block's
+     baseline is its LAST line, so a wrapped title pushes STARTED down
+     (Chromium) or climbs up over the filter form (WebKit). */
   table.list a.row-link {
     display: block;
     padding: 4px 0;

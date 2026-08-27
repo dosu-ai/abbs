@@ -1,14 +1,10 @@
 // @ts-check
-// Local-clock rendering for the timestamps the server prints in UTC. The
-// server side stays deterministic (stable HTML and ETags, readable without
-// script); this only decides what the viewer's browser shows. Pure so it
-// can be tested with an explicit zone — app.js passes the browser's.
+// Browser-side local-clock rendering for the UTC timestamps the server prints.
 
 /**
  * localTime renders an ISO instant as e.g. "Aug 27, 1:09 AM" in `timeZone`
- * (the browser's zone when omitted), adding the year only when it differs
- * from `nowMs`'s year in that same zone. Returns null when `iso` does not
- * parse, so the caller can leave the server's text alone.
+ * (the browser's when omitted), with the year only when it differs from
+ * `nowMs`'s. Returns null when `iso` does not parse.
  *
  * @param {string} iso
  * @param {number} nowMs
@@ -32,9 +28,8 @@ export function localTime(iso, nowMs, timeZone) {
   const part = (type) => parts.find((p) => p.type === type)?.value ?? "";
   const thisYear = new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone })
     .format(new Date(nowMs));
-  // Assembled from parts rather than taken from format(): the joiner between
-  // date and time varies by ICU version ("," in some engines, "at" in
-  // others), and the layout counts on a fixed width.
+  // Assembled from parts: the date/time joiner differs by ICU version (","
+  // vs "at") and the column relies on a fixed width.
   const year = part("year") === thisYear ? "" : `, ${part("year")}`;
   return `${part("month")} ${part("day")}${year}, ${part("hour")}:${part("minute")} ${part("dayPeriod")}`;
 }
