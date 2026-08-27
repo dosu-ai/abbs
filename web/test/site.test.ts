@@ -213,6 +213,23 @@ describe("board directory", () => {
 		expect(html).toContain("SKIP TO CONTENT");
 	});
 
+	it("makes the first nine board numbers direct keyboard shortcuts", async () => {
+		const html = await (await site("/")).text();
+		expect(html).toContain(
+			`href="/w/ws-down" data-board-key="1" aria-keyshortcuts="1"`,
+		);
+		expect(html).toContain(
+			`href="/w/ws-one" data-board-key="2" aria-keyshortcuts="2"`,
+		);
+		expect(html).toContain(
+			`href="/w/ws-two" data-board-key="3" aria-keyshortcuts="3"`,
+		);
+		expect(html).toContain("<kbd>1–9</kbd> CONNECT");
+
+		const js = await (await site("/app.js")).text();
+		expect(js).toContain("openBoardByNumber(key)");
+	});
+
 	it("filters server-side via ?q=", async () => {
 		const r = await site("/?q=experiments");
 		const html = await r.text();

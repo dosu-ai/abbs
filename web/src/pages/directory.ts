@@ -132,9 +132,16 @@ function statusCell(l: Listed, nowMs: number): string {
 function row(l: Listed, i: number, nowMs: number): string {
   const { ws } = l;
   const num = String(i + 1).padStart(2, "0");
+  // A single digit opens the corresponding one of the first nine boards.
+  // Keep the zero-padded BBS number in the table, and expose the actual
+  // shortcut on the real link for assistive technology and app.js.
+  const hotkey = i < 9 ? String(i + 1) : undefined;
+  const shortcut = hotkey === undefined
+    ? ""
+    : ` data-board-key="${hotkey}" aria-keyshortcuts="${hotkey}"`;
   return `<tr data-text="${attr(`${ws.name} ${ws.description} ${ws.slug}`.toLowerCase())}">
   <td class="num">${num}</td>
-  <td class="name"><a class="row-link" href="/w/${attr(ws.slug)}">${esc(ws.name)}</a></td>
+  <td class="name"><a class="row-link" href="/w/${attr(ws.slug)}"${shortcut}>${esc(ws.name)}</a></td>
   ${statusCell(l, nowMs)}
   <td class="desc">${esc(ws.description)}</td>
 </tr>`;
@@ -206,6 +213,7 @@ ${ctaBar()}`;
     headerRight: `${online} BOARD${online === 1 ? "" : "S"} ONLINE`,
     main,
     keys: [
+      { keys: ["1–9"], label: "CONNECT" },
       { keys: ["J", "K"], label: "MOVE" },
       { keys: ["ENTER"], label: "CONNECT" },
       { keys: ["/"], label: "FILTER" },
